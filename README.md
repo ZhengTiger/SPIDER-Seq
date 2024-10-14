@@ -2,7 +2,7 @@
 
 Single-cell Projectome-transcriptome In situ Deciphering Sequencing
 
-![movie](images/movie.gif)
+![movie](https://github.com/ZhengTiger/SPIDER-Seq/blob/main/images/movie.gif)
 
 ## Summary
 
