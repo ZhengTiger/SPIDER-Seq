@@ -1,0 +1,139 @@
+# FigureS5_2
+
+```{r}
+#| warning: false
+#| message: false
+
+library(Seurat)
+library(tidyverse)
+library(hdWGCNA)
+library(cowplot)
+library(patchwork)
+library(enrichR)
+library(GeneOverlap)
+library(umap)
+library(scCustomize)
+library(ggpointdensity)
+
+library(Biorplot)
+source('bin/Palettes.R')
+source('bin/includes.R')
+```
+
+
+```{r}
+#all.Adult <- readRDS('../data/rds/all.Adult.rds')
+Adult.Ex <- readRDS('../data/rds/Adult.Ex.rds')
+#sp.PFC <- readRDS('../data/rds/sp.PFC.rds')
+#PFC.MERFISH <- readRDS('../data/rds/PFC.MERFISH.rds')
+```
+
+
+
+
+## FigureS5_2 A
+
+```{r}
+load("../data/csv/transmitter_and_receptor/hdwgcna.RData")
+```
+
+
+```{r fig.width=6, fig.height=3}
+PlotDendrogram(seu, main='hdWGCNA Dendrogram')
+```
+
+
+
+
+## FigureS5_2 B
+
+```{r}
+df <- as.data.frame(seu@reductions$umap@cell.embeddings)
+df$M1 <- seu@misc$Adult.IT.PT.barcode$MEs$M1
+df$M2 <- seu@misc$Adult.IT.PT.barcode$MEs$M2
+df$M3 <- seu@misc$Adult.IT.PT.barcode$MEs$M3
+df$M4 <- seu@misc$Adult.IT.PT.barcode$MEs$M4
+#df <- df[which(seu$Ex_subtype=="IT"),]
+df <- df[df$UMAP_1 < 1.2 & df$UMAP_1 > -13,]
+```
+
+
+```{r fig.width=12, fig.height=3}
+module <- c("M1","M2","M3","M4")
+col <- c("blue","yellow","turquoise","brown")
+plist <- list()
+for (i in 1:4){
+  plist[[i]] <- 
+    ggplot() +
+    geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+    geom_pointdensity(df[which(df[,module[i]]>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+    scale_color_gradientn(colours = c("lightgray","white",col[i]),
+                          na.value = col[i], limits = c(0,50), breaks = c(0,50)) +
+    coord_fixed() +
+    theme_void() +
+    labs(title = module[i], x="", y="", colour = "") +
+    theme(plot.title = element_text(hjust = 0.5, size = 20),
+          legend.text = element_text(hjust = 0.5, size = 15),
+          legend.position = "right",
+          legend.key.width  = unit(1, "lines"),
+          legend.key.height = unit(1.5, "lines"))
+}
+FigureS5_2_B <- plot_grid(plotlist = plist, ncol=4)
+FigureS5_2_B
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/FigureS5_2/FigureS5_2_B.pdf", plot = FigureS5_2_B,
+       height = 3, width = 12, units = "in")
+```
+
+
+
+
+
+## FigureS5_2 D
+
+```{r}
+dbs <- c('GO_Biological_Process_2021','GO_Cellular_Component_2021','GO_Molecular_Function_2021')
+seu <- RunEnrichr(seu,dbs=dbs,max_genes = 100)
+enrich_df <- GetEnrichrTable(seu)
+```
+
+```{r fig.width=15, fig.height=5}
+module <- c("M1","M2","M3","M4")
+col <- c("blue","yellow","turquoise","brown")
+plist <- list()
+for (i in 1:4){
+  df <- enrich_df[which(enrich_df$module == module[i]),]
+  df <- df[order(df$Combined.Score, decreasing = T),]
+  df <- df[1:10,]
+  df$Combined.Score.log <- log10(df$Combined.Score)
+  df$Term <- factor(df$Term, levels = rev(df$Term))
+  
+  plist[[i]] <- 
+    ggplot(df, aes(Combined.Score.log, Term)) + 
+    geom_col(fill=col[i]) +
+    geom_text(aes(x=0.05, label=Term), hjust=0) +
+    labs(x="log10(Enrichment)", y="") +
+    scale_x_continuous(expand = c(0,0)) +
+    theme_classic() +
+    theme(axis.text.y = element_blank(), 
+          axis.line.y = element_blank(),
+          axis.ticks.y = element_blank())
+}
+
+FigureS5_2_D <- plot_grid(plotlist = plist, ncol = 4)
+FigureS5_2_D
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/FigureS5_2/FigureS5_2_D.pdf", plot = FigureS5_2_D,
+       height = 5, width = 15, units = "in")
+```
+

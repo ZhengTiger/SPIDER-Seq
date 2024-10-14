@@ -1,0 +1,784 @@
+---
+author: "Hu Zheng"
+date: "2024-10-01"
+date-format: YYYY-MM-DD
+---
+
+# Figure6
+
+```{r}
+#| warning: false
+#| message: false
+
+library(Seurat)
+library(tidyverse)
+library(hdWGCNA)
+library(cowplot)
+library(patchwork)
+library(enrichR)
+library(GeneOverlap)
+library(umap)
+library(scCustomize)
+library(ggpointdensity)
+
+library(Biorplot)
+source('bin/Palettes.R')
+#source('bin/includes.R')
+```
+
+
+```{r}
+all.Adult <- readRDS('../data/rds/all.Adult.rds')
+Adult.Ex <- readRDS('../data/rds/Adult.Ex.rds')
+#sp.PFC <- readRDS('../data/rds/sp.PFC.rds')
+#PFC.MERFISH <- readRDS('../data/rds/PFC.MERFISH.rds')
+```
+
+
+```{r}
+Adult.Ex.barcode <- subset(Adult.Ex, cells=colnames(Adult.Ex)[which(
+  Adult.Ex$BC_num>0
+  )])
+
+Adult.IT.PT.barcode <- subset(Adult.Ex, cells=colnames(Adult.Ex)[which(
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "IT") |
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "PT" & Adult.Ex$sample == "Adult1")
+  )])
+```
+
+
+```{r}
+gene_lib <- read.csv('../data/csv/transmitter_and_receptor/gene_lib.csv')
+
+AGMs <- unique(str_to_title(gene_lib$Axon_Guidance))
+CAMs <- unique(str_to_title(gene_lib$CAM))
+all_gene <- unique(c(AGMs, CAMs))
+
+# filter
+seu <- Adult.IT.PT.barcode
+all_gene <- all_gene[which(all_gene %in% rownames(seu))]
+# gene expression filter
+all_gene_exp <- AverageExpression(
+  seu, features=all_gene, assays="RNA", slot="data", group.by="Proj_subtype"
+  )$RNA
+all_gene_exp <- as.data.frame(log1p(all_gene_exp))
+all_gene_exp$max <- apply(all_gene_exp, 1, max)
+# gene cell percentage filter
+all_gene_pct <- as.data.frame(t(as.matrix(seu@assays$RNA@data[all_gene,])))
+all_gene_pct$Proj_subtype <- as.character(seu$Proj_subtype)
+all_gene_pct <- 
+  all_gene_pct |>
+  dplyr::group_by(Proj_subtype) |>
+  dplyr::summarize(across(1:length(all_gene), function(x){
+    length(which(x>0))/length(x)
+    })) |>
+  as.data.frame()
+rownames(all_gene_pct) <- all_gene_pct$Proj_cluster
+all_gene_pct <- as.data.frame(t(all_gene_pct[,-1]))
+colnames(all_gene_pct) <- 1:33
+all_gene_pct$max <- apply(all_gene_pct, 1, max)
+
+all_gene <- all_gene[which(all_gene_exp$max>0.1 & all_gene_pct$max>0.1)]
+AGMs <- AGMs[which(AGMs %in% all_gene)]
+CAMs <- CAMs[which(CAMs %in% all_gene)]
+AGMs <- AGMs[which(!(AGMs %in% CAMs))]
+```
+
+```{r}
+seu <- Adult.IT.PT.barcode
+Idents(seu) <- "Proj_module"
+DEGs <- FindAllMarkers(seu, features=all_gene, logfc.threshold = 0.25, min.pct = 0.1)
+all_gene <- unique(DEGs$gene)
+```
+
+
+
+
+
+## Figure6_A
+
+```{r fig.width=10, fig.height=4}
+# gene_order
+PTi_gene <- c(
+  "Sema3e","Sema3c","Spon1","Sdk2","Cntfr","Cntn1","Ntng1","Cdh6","Emb","Cdh20",
+  "Ctnna2","Flrt1","Fam19a1","Rgma","Igfbp4","Ephb1","Disp2","Celsr2","Sema6d",
+  "Tpbg","Dscaml1","Kirrel3","Wnt5a","Fgfr1","Cntnap5b","Cntnap2","Cdh22","Nrp1",
+  "Nrxn3","Ntrk3","Nrcam","Opcml","Clstn3","Cntn2","Cntnap1","Ephb3","Lrrn1","Epha7"
+  )
+ITi_D_gene <- c(
+  "Robo2","Clstn1","Lrrc8b","Camk2g","Ntm","Tspan5","Dkk3","Cadm4","Pcdh7","Sema7a",
+  "Cadm2","Cbln2","Frzb","Tyro3","Rtn4","Ppp3ca","Cdh12","Fstl4","Nptx2","Lingo1",
+  "Pcdh9","Unc5d","Il1rap","Rtn4r","Nptx1","Plxna4","Cdh9","Bmp3","Crtac1","Nrp2",
+  "Ptprt","Jund","Ubb","Camk1","Lrrc4c","Pcdh15","Matn2","Il1rapl1"
+  )
+ITi_V_gene <- c(
+  "Edil3","Epha4","Cadm3","Col25a1","Ptprk","Islr2","Lrp8","Il1rapl2","Cdh10","Nbl1",
+  "Lrrc4","Ptprd","Coch","Plxnd1","Ptgfrn","Dkkl1","Fat3","Vstm2a","Efnb2","Cdh2",
+  "Ncam2","Lsamp","Pcdh10","Sema3d","Rspo2","Jun","Smoc2","Car4","Sdc3","C1ql3",
+  "Plxnc1","Cdh13","Efnb3","Nov","Cadm1"
+)
+gene_order <- c(PTi_gene,ITi_D_gene,ITi_V_gene)
+
+# annotation_col
+ITi_D <- c("1","14","17","22","23","25","26","27","28","29","31")
+ITi_V <- c("7","8","9","10","15","16","18","19","20","21")
+ITc <- c("2","3","11","12","13","24","30","32","33")
+PTi <- c("4","5","6")
+Proj_subtype_order <- as.character(c(PTi,ITi_D,ITi_V))
+
+avg_exp <- AverageExpression(seu, features = gene_order, group.by = 'Proj_subtype',
+                             assays = "RNA", slot = "data")
+avg_exp <- avg_exp$RNA
+avg_exp_zscore <- as.matrix(scale(t(avg_exp)))
+
+annotation_col = data.frame(
+  Gene_module = rep(c("module1","module2","module3"),
+                    c(length(PTi_gene),length(ITi_D_gene),length(ITi_V_gene))),
+  row.names = gene_order
+)
+annotation_col$Gene_type <- ""
+annotation_col$Gene_type[which(rownames(annotation_col) %in% AGMs)] <- "AGMs"
+annotation_col$Gene_type[which(rownames(annotation_col) %in% CAMs)] <- "CAMs"
+
+# annotation_row
+annotation_row = data.frame(
+  Projection_module = factor(rep(c("PTi", "ITi-D", "ITi-V"), c(3, 11, 10)),
+                  levels = c("PTi", "ITi-D", "ITi-V")),
+  row.names = Proj_subtype_order
+)
+
+# ann_color
+ann_colors = list(
+  Projection_module = c('PTi'='#d62728','ITi-D'='#1f77b4','ITi-V'='#ff7f0e'),
+  Gene_type = c("AGMs"="#8ebbda","CAMs"="#e99496"),
+  Gene_module = c('module1'="#ff6666",'module2'="#6666ff",'module3'='#FDAE6BFF')
+)
+
+#dist = dist(t(avg_exp_zscore[Proj_subtype_order,gene_order]))
+#hclust <- hclust(dist)
+#dend = reorder(as.dendrogram(hclust), wts=1:length(gene_order))
+#col_cluster <- as.hclust(dend)
+#col_cluster$order <- 1:length(gene_order)
+
+breaks <- seq(-2,2,0.01)
+Figure6_A <- 
+  pheatmap::pheatmap(avg_exp_zscore[Proj_subtype_order, gene_order],
+         cluster_rows = F, cluster_cols = F, border_color = "grey60",
+         breaks = breaks,
+         color = colorRampPalette(c("navy", "white","firebrick3"))(length(breaks)),
+         annotation_row = annotation_row, annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         gaps_col = c(38,76),
+         gaps_row = c(3,14,24),
+         fontsize_col = 6, show_colnames = F,
+         annotation_names_row=F,annotation_names_col=F
+         )
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_A.pdf", plot = Figure6_A,
+       height = 4, width = 10, units = "in")
+```
+
+
+
+
+
+## Figure6_B
+
+```{r}
+#| message: false
+#| warning: false
+
+seu <- Adult.IT.PT.barcode
+Idents(seu) <- "Proj_module"
+DEGs <- FindAllMarkers(seu, features=all_gene, logfc.threshold = 0)
+#DEGs$p_val_adj[which(DEGs$p_val_adj==0)] <- 1e-290
+
+all_gene_DEGs <- DEGs[which(DEGs$avg_log2FC>0),]
+all_gene_DEGs$gene_type <- ""
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% AGMs)] <- "AGMs"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% CAMs)] <- "CAMs"
+```
+
+```{r fig.width=9, fig.height=3}
+proj_module <- c("PTi","ITi-D","ITi-V")
+plist <- list()
+for (i in 1:3){
+  DEGs_module <- all_gene_DEGs[all_gene_DEGs$cluster == proj_module[i],]
+  top10_gene <- DEGs_module$gene[order(DEGs_module$p_val_adj)][1:5]
+  DEGs_module$label <- ""
+  DEGs_module$label[match(top10_gene, DEGs_module$gene)] <- top10_gene
+  if (i==1){
+    x_max <- 2.2
+  }else{
+    x_max <- 1
+  }
+  plist[[i]] <- 
+    ggplot(DEGs_module, aes(x=avg_log2FC, y= -log10(p_val_adj))) +
+    geom_point(aes(fill=gene_type), shape=21, color="black" , size=3) +
+    #geom_vline(aes(xintercept=0), colour="black", linetype="dashed", 
+    #           linewidth = 0.5) +
+    geom_text_repel(aes(label=label, color=gene_type), size=5, max.overlaps=100) +
+    theme_classic() +
+    theme(plot.title = element_text(size = 20, hjust = 0.5),
+          text = element_text(size = 15), legend.position = "none") +
+    scale_fill_manual(values = c("AGMs"="#8ebbda","CAMs"="#e99496")) +
+    scale_color_manual(values = c("AGMs"="#8ebbda","CAMs"="#e99496")) +
+    #xlim(0, x_max) +
+    ylim(0,max(-log10(DEGs_module$p_val_adj))) +
+    scale_x_continuous(breaks=c(0,0.5,1,1.5,2), limits = c(0,x_max)) +
+    labs(title = proj_module[i], x = 'log2FC', y = '-log10(P value)')
+}
+Figure6_B <- plot_grid(plotlist = plist, ncol = 3)
+Figure6_B
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_B.pdf", plot = Figure6_B,
+       height = 3, width = 9, units = "in")
+```
+
+
+
+
+
+## Figure6_C
+
+```{r fig.width=9, fig.height=3}
+Barcode <- c('VIS-I','SSp-I','CP-I','AUD-I','RSP-I',
+             'BLA-I','ACB-I','ENTl-I','AId-I','ECT-I',
+             'ACB-C','PL-C','ECT-C','ENTl-C',
+             'BLA-C','CP-C','AId-C','RSP-C',
+             'MD-I','RE-I','DR-I','VTA-I','LHA-I','SC-I')
+Ex_BC_mat <- Adult.Ex.barcode@meta.data[,Barcode]
+Ex_BC_mat[is.na(Ex_BC_mat)] <- 0
+Ex_BC_mat <- scale(Ex_BC_mat)
+Ex_BC_mat <- Ex_BC_mat[Adult.Ex.barcode$BC_num > 1,]
+#set.seed(20230321)
+set.seed(20240422)
+umap_out <- umap(Ex_BC_mat)
+umap_result <- as.data.frame(umap_out$layout)
+colnames(umap_result) = c("UMAP_1","UMAP_2")
+
+seu <- subset(Adult.Ex.barcode, cells = rownames(umap_result))
+seu@reductions$umap@cell.embeddings[,"UMAP_1"] <- umap_result$UMAP_1
+seu@reductions$umap@cell.embeddings[,"UMAP_2"] <- umap_result$UMAP_2
+
+gene <- c("Igfbp4","Pcdh7","Cdh13")
+plist <- list()
+for (i in 1:3){
+  plist[[i]] <- Plot_Density_Custom(seurat_object = seu, features = gene[i],
+                    viridis_palette = "magma") +
+    theme_void() +
+    theme(plot.title = element_text(hjust = 0.5, size = 25)) +
+    coord_fixed()
+}
+Figure6_C <- plot_grid(plotlist = plist, nrow = 1)
+Figure6_C
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_C.pdf", plot = Figure6_C,
+       height = 3, width = 9, units = "in")
+```
+
+
+
+
+
+## Figure6_D
+
+```{r fig.width=8, fig.height=3}
+gene <- c(PTi_gene, ITi_D_gene, ITi_V_gene)
+gene_BC_mat <- as.data.frame(seu@assays$RNA@data[gene,])
+gene_BC_mat$Gene_module <- rep(c('module 1','module 2','module 3'),
+                               c(length(PTi_gene), length(ITi_D_gene),
+                                 length(ITi_V_gene)))
+gene_BC_mat <- 
+  gene_BC_mat |>
+  group_by(Gene_module) |>
+  dplyr::summarize(across(1:ncol(seu), mean)) |>
+  as.data.frame()
+rownames(gene_BC_mat) <- gene_BC_mat$Gene_module
+gene_BC_mat <- t(gene_BC_mat[,2:ncol(gene_BC_mat)])
+gene_BC_mat <- cbind(
+  gene_BC_mat,
+  seu@meta.data[,c('PTi_score','ITi_D_score','ITi_V_score')]
+  )
+colnames(gene_BC_mat)[4:6] <- c('PTi', 'ITi-D', 'ITi-V')
+
+Gene_module <- c('module 1','module 2','module 3')
+Proj_module <- c('PTi', 'ITi-D', 'ITi-V')
+#Proj_module <- c('ITi-D', 'ITi-V', 'PTi')
+#Proj_module <- c('ITi-V', 'PTi', 'ITi-D')
+plist <- list()
+for (i in 1:3){
+  df_i <- gene_BC_mat[,c(Gene_module[i],'PTi', 'ITi-D', 'ITi-V')]
+  df_i <- df_i[df_i[,1]>0,]
+  df_i[,'exp_order'] <- rank(df_i[,1])
+  df_i[,'bin'] <- cut(
+    df_i[,'exp_order'],
+    seq(1, max(df_i[,'exp_order']), length.out=11),
+    labels = c(1:10))
+  df_i <- 
+    df_i |>
+    group_by(bin) |>
+    dplyr::summarize(across(2:4, ~ mean(.x, na.rm = TRUE)))
+  df_i_norm <- as.data.frame(apply(df_i[1:10,2:ncol(df_i)],2,function(x){
+    (x-min(x))/(max(x)-min(x))
+    }))
+  df_i_norm$x <- df_i$bin[1:10]
+  df_i_norm <- 
+    df_i_norm |>
+    pivot_longer(!x, names_to = 'Target', values_to = "Value")
+  df_i_norm$x <- as.numeric(df_i_norm$x)
+  df_i_norm$Target <- factor(
+    df_i_norm$Target, 
+    levels = c('PTi','ITi-D','ITi-V')
+    )
+  df_i_norm <- df_i_norm[which(df_i_norm$Target==Proj_module[i]),]
+  
+  cor <- cor.test(df_i_norm$x, df_i_norm$Value, "two.sided", "pearson")
+  R <- round(cor$estimate,2)
+  P <- format(cor$p.value, digits = 2)
+  
+  plist[[i]] <- 
+    ggplot(df_i_norm, aes(x=x, y=Value, color=Target)) +
+    geom_line(linewidth=1) +
+    geom_point(aes(fill=Target),shape=21, color="black" , size=3) +
+    geom_text(x=1, y=0.95, label = paste('R =',R,'\nP =',P,sep=' '), hjust=0,
+              color="black") +
+    scale_x_continuous(breaks = c(1,5,10), 
+                       labels = c("10%","50%","100%")) +
+    scale_color_manual(values = col_Proj_module) +
+    scale_fill_manual(values = col_Proj_module) +
+    labs(x=paste(Gene_module[i],"expression"), 
+         y=paste(Proj_module[i],"projection strength"), 
+         title=paste(Gene_module[i])) +
+    theme_classic() + 
+    theme(legend.position="none", plot.title = element_text(hjust = 0.5, size = 20),
+          text = element_text(size = 10))
+}
+
+Figure6_D <- plot_grid(plotlist = plist, nrow = 1)
+Figure6_D
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_D.pdf", plot = Figure6_D,
+       height = 3, width = 8, units = "in")
+```
+
+
+
+
+
+## Figure6_E
+
+```{r}
+load("../data/csv/CAMs_AGMs/CAMs_AGMs.hdwgcna.RData")
+```
+
+
+```{r fig.width=4, fig.height=4}
+#| warning: false
+#| message: false
+
+set.seed(20240703)
+modules <- GetModules(seu.hdwgcna.AGMs_CAMs)
+mods <- levels(modules$module)
+mods <- mods[mods != 'grey']
+
+Figure6_E <- 
+  HubGeneNetworkPlot(
+  seu.hdwgcna.AGMs_CAMs,
+  n_hubs = 10, n_other=100,
+  edge_prop = 0.8,
+  edge.alpha = 0.8,
+  mods = mods,  
+  return_graph=FALSE
+)
+```
+
+
+
+
+
+## Figure6_F
+
+```{r}
+Barcode_order <- c("MD-I","RE-I","DR-I","VTA-I","LHA-I","SC-I", 
+                   "VIS-I","SSp-I","CP-I","AUD-I","RSP-I",
+                   "BLA-I","ACB-I","ENTl-I","AId-I","ECT-I",
+                   "ACB-C","PL-C","ECT-C","ENTl-C","BLA-C","CP-C","AId-C","RSP-C")
+Ex_BC_mat <- all.Adult@meta.data[colnames(seu.hdwgcna.AGMs_CAMs), Barcode_order]
+Ex_BC_mat <- log1p(10000*Ex_BC_mat/seu.hdwgcna.AGMs_CAMs$nCount_RNA)
+
+# module ME
+m_obj <- GetMetacellObject(seu.hdwgcna.AGMs_CAMs)
+MEs <- GetMEs(seu.hdwgcna.AGMs_CAMs, harmonized=FALSE)
+MEs <- MEs[,-grep('grey',colnames(MEs))]
+# metacell module ME
+meta_MEs <- matrix(nrow = nrow(m_obj@meta.data), ncol = ncol(MEs))
+rownames(meta_MEs) <- rownames(m_obj@meta.data)
+colnames(meta_MEs) <- colnames(MEs)
+# metacell Barcode
+meta_BCs <- matrix(nrow = nrow(m_obj@meta.data), ncol = length(Barcode_order))
+rownames(meta_BCs) <- rownames(m_obj@meta.data)
+colnames(meta_BCs) <- Barcode_order
+for (i in 1:nrow(meta_MEs)){
+  meta_MEs[i,] <- colMeans(MEs[strsplit(m_obj$cells_merged[[i]], ',')[[1]],], na.rm = T)
+  meta_BCs[i,] <- colMeans(Ex_BC_mat[strsplit(m_obj$cells_merged[[i]], ',')[[1]],], na.rm = T)
+}
+meta_BCs[is.nan(meta_BCs)] <- NA
+# coorelation between module ME and Barcode
+meta_R <- matrix(nrow = 5, ncol = length(Barcode_order))
+rownames(meta_R) <- c("M1","M2","M3","M4","M5")
+colnames(meta_R) <- Barcode_order
+meta_P <- meta_R
+for (i in 1:5){
+  for (j in 1:24){
+    cor <- cor.test(meta_MEs[,rownames(meta_R)[i]], meta_BCs[,colnames(meta_R)[j]],
+                    "two.sided", "pearson")
+    meta_R[i,j] <- round(cor$estimate,2)
+    meta_P[i,j] <- format(cor$p.value, digits = 2)
+  }
+}
+meta_R <- as.data.frame(meta_R)
+meta_R$Module <- rownames(meta_R)
+df_meta_R <- pivot_longer(meta_R, !Module, names_to = "Target", values_to = "R")
+meta_P <- as.data.frame(meta_P)
+meta_P$Module <- rownames(meta_P)
+df_meta_P <- pivot_longer(meta_P, !Module, names_to = "Target", values_to = "Pvalue")
+df <- data.frame(
+  "Module" = df_meta_R$Module,
+  "Target" = df_meta_R$Target,
+  "R" = as.numeric(df_meta_R$R),
+  "Pvalue" = as.numeric(df_meta_P$Pvalue)
+)
+df$Log_Pvalue <- -log10(df$Pvalue)
+```
+
+
+```{r fig.width=8, fig.height=4}
+#| warning: false
+#| message: false
+
+Barcode <- c("VIS-I","SSp-I","CP-I","AUD-I","RSP-I",
+             "BLA-I","ACB-I","ENTl-I","AId-I","ECT-I",
+             "ACB-C","PL-C","ECT-C","ENTl-C","BLA-C","CP-C","AId-C","RSP-C",
+             "MD-I","RE-I","DR-I","VTA-I","LHA-I","SC-I")
+df$Target <- factor(df$Target, levels = Barcode)
+df$Module <- factor(df$Module, levels = rev(c("M1","M2","M3","M4","M5")))
+df$label <- ""
+df$label[which(df$R>0 & df$Pvalue < 0.05)] <- "*"
+df$label[which(df$R>0 & df$Pvalue < 0.01)] <- "**"
+df$label[which(df$R>0 & df$Pvalue < 0.001)] <- "***"
+
+breaks <- seq(-0.5,0.5,0.01)
+df$R[which(df$R < -0.5)] <- -0.5
+df$R[which(df$R > 0.5)] <- 0.5
+Figure6_F <- 
+  ggplot(df, aes(x=Target, y=Module, fill=R)) +
+  geom_tile(color="gray", size=0.5) +
+  geom_text(aes(label=label),col ="black",size = 4) +
+  #geom_vline(xintercept = c(1.5:23.5), size=1, color="lightgray") +
+  scale_fill_gradientn(limits=c(-0.5,0.5), colours = colorRampPalette(c("navy","white","firebrick3"))(100), na.value="firebrick3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5, size = 15), 
+        axis.text.y = element_text(size = 15),
+        panel.grid = element_blank()) +
+  labs(x="", y="")
+Figure6_F
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_F.pdf", plot = Figure6_F,
+       height = 4, width = 8, units = "in")
+```
+
+
+
+
+
+## Figure6_G
+
+```{r}
+seu <- seu.hdwgcna.AGMs_CAMs
+df <- as.data.frame(seu@reductions$umap@cell.embeddings)
+df$M2 <- seu@misc$AGMs_CAMs$MEs$M2
+df$M4 <- seu@misc$AGMs_CAMs$MEs$M4
+df$`AId-I` <- seu$`AId-I`
+df$`AId-I`[is.na(df$`AId-I`)] <- 0
+df$`CP-C` <- seu$`CP-C`
+df$`CP-C`[is.na(df$`CP-C`)] <- 0
+df <- df[which(seu$Ex_subtype=="IT"),]
+df <- df[df$UMAP_1 < 2 & df$UMAP_2 > -3,]
+```
+
+
+```{r fig.width=6, fig.height=3}
+Figure6_G_1 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$M4>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","blue"),
+                        na.value = "blue",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "M4", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure6_G_1
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_G_1.pdf", plot = Figure6_G_1,
+       height = 3, width = 6, units = "in")
+```
+
+
+```{r fig.width=6, fig.height=3}
+Figure6_G_2 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$`CP-C`>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","red"),
+                        na.value = "red",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "CP-C", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure6_G_2
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_G_2.pdf", plot = Figure6_G_2,
+       height = 3, width = 6, units = "in")
+```
+
+
+```{r fig.width=4, fig.height=4}
+df_cor <- df[which(df$`CP-C`>0),]
+df_cor[,'exp_order'] <- rank(df_cor$M4)
+df_cor[,'bin'] <- cut(
+  df_cor[,'exp_order'],
+  seq(1, max(df_cor[,'exp_order']), length.out=11),
+  labels = c(1:10)
+  )
+df_cor <- 
+  df_cor |>
+    group_by(bin) |>
+    dplyr::summarize(across(3:6, ~ mean(.x, na.rm = TRUE)))
+
+df_cor_norm <- as.data.frame(apply(df_cor[1:10,2:ncol(df_cor)],2,function(x){
+    (x-min(x))/(max(x)-min(x))
+    }))
+df_cor_norm$x <- df_cor$bin[1:10]
+
+cor <- cor.test(df_cor_norm$M4, df_cor_norm$`CP-C`, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2)
+
+Figure6_G_3 <- 
+  ggplot(df_cor_norm, aes(x=x, y=`CP-C`, group=1)) +
+    geom_line(linewidth=1, color="blue") +
+    geom_point(fill="blue",shape=21, color="black" , size=3) +
+    geom_text(x=1, y=0.95, label = paste('R =',R,'\nP =',P,sep=' '), hjust=0,
+              color="black") +
+    scale_x_discrete(breaks = c(1,5,10), 
+                     labels = c("10%","50%","100%")) +
+    #scale_color_manual(values = col_Proj_module) +
+    #scale_fill_manual(values = col_Proj_module) +
+    labs(x=paste("M4 Eigengenes"), 
+         y=paste("CP-C projection strength"), 
+         title="") +
+    theme_classic() + 
+    theme(legend.position="none", plot.title = element_text(hjust = 0.5, size = 20),
+          text = element_text(size = 10))
+Figure6_G_3
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_G_3.pdf", plot = Figure6_G_3,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+
+## Figure6_H
+
+```{r}
+seu <- seu.hdwgcna.AGMs_CAMs
+df <- as.data.frame(seu@reductions$umap@cell.embeddings)
+df$M2 <- seu@misc$AGMs_CAMs$MEs$M2
+df$M4 <- seu@misc$AGMs_CAMs$MEs$M4
+df$`AId-I` <- seu$`AId-I`
+df$`AId-I`[is.na(df$`AId-I`)] <- 0
+df$`CP-C` <- seu$`CP-C`
+df$`CP-C`[is.na(df$`CP-C`)] <- 0
+df <- df[which(seu$Ex_subtype=="IT"),]
+df <- df[df$UMAP_1 < 2 & df$UMAP_2 > -3,]
+```
+
+```{r fig.width=6, fig.height=3}
+Figure6_H_1 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$M2>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","yellow"),
+                        na.value = "yellow",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "M2", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure6_H_1
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_H_1.pdf", plot = Figure6_H_1,
+       height = 3, width = 6, units = "in")
+```
+
+
+```{r fig.width=6, fig.height=3}
+Figure6_H_2 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$`AId-I`>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","red"),
+                        na.value = "red",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "AId-I", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure6_H_2
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_H_2.pdf", plot = Figure6_H_2,
+       height = 3, width = 6, units = "in")
+```
+
+
+```{r fig.width=4, fig.height=4}
+df_cor <- df[which(df$`AId-I`>0),]
+df_cor[,'exp_order'] <- rank(df_cor$M2)
+df_cor[,'bin'] <- cut(
+  df_cor[,'exp_order'],
+  seq(1, max(df_cor[,'exp_order']), length.out=11),
+  labels = c(1:10)
+  )
+df_cor <- 
+  df_cor |>
+    group_by(bin) |>
+    dplyr::summarize(across(3:6, ~ mean(.x, na.rm = TRUE)))
+
+df_cor_norm <- as.data.frame(apply(df_cor[1:10,2:ncol(df_cor)],2,function(x){
+    (x-min(x))/(max(x)-min(x))
+    }))
+df_cor_norm$x <- df_cor$bin[1:10]
+
+cor <- cor.test(df_cor_norm$M2, df_cor_norm$`AId-I`, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2)
+
+Figure6_H_3 <- 
+  ggplot(df_cor_norm, aes(x=x, y=`AId-I`, group=1)) +
+    geom_line(linewidth=1, color="yellow") +
+    geom_point(fill="yellow",shape=21, color="black" , size=3) +
+    geom_text(x=1, y=0.95, label = paste('R =',R,'\nP =',P,sep=' '), hjust=0,
+              color="black") +
+    scale_x_discrete(breaks = c(1,5,10), 
+                     labels = c("10%","50%","100%")) +
+    #scale_color_manual(values = col_Proj_module) +
+    #scale_fill_manual(values = col_Proj_module) +
+    labs(x=paste("M2 Eigengenes"), 
+         y=paste("AId-I projection strength"), 
+         title="") +
+    theme_classic() + 
+    theme(legend.position="none", plot.title = element_text(hjust = 0.5, size = 20),
+          text = element_text(size = 10))
+Figure6_H_3
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure6/Figure6_H_3.pdf", plot = Figure6_H_3,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+
+
+
+
+
+

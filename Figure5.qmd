@@ -1,0 +1,896 @@
+---
+author: "Hu Zheng"
+date: "2024-10-01"
+date-format: YYYY-MM-DD
+---
+
+# Figure5
+
+```{r}
+#| warning: false
+#| message: false
+
+library(Seurat)
+library(tidyverse)
+library(hdWGCNA)
+library(cowplot)
+library(patchwork)
+library(enrichR)
+library(GeneOverlap)
+library(ggpointdensity)
+library(viridis)
+library(ggrastr)
+library(RColorBrewer)
+
+library(Biorplot)
+source('bin/Palettes.R')
+source('bin/includes.R')
+```
+
+
+```{r}
+Adult.Ex <- readRDS('../data/rds/Adult.Ex.rds')
+sp.PFC <- readRDS('../data/rds/sp.PFC.rds')
+```
+
+
+```{r}
+Adult.Ex.barcode <- subset(
+  Adult.Ex, 
+  cells=colnames(Adult.Ex)[which(Adult.Ex$BC_num>0)]
+  )
+
+Adult.IT.PT.barcode <- subset(Adult.Ex, cells=colnames(Adult.Ex)[which(
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "IT") |
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "PT" & Adult.Ex$sample == "Adult1")
+  )])
+```
+
+
+
+
+```{r}
+gene_lib <- read.csv('../data/csv/transmitter_and_receptor/gene_lib.csv')
+# receptor
+Monoamine_R <- str_to_title(gene_lib$Monoamine.Ach.receptor)
+Neuropeptides_R <- str_to_title(gene_lib$Neuropeptides.receptor)
+mGluR <- str_to_title(gene_lib$mGluR.Kainate.receptor)
+GABA_R <- str_to_title(gene_lib$GABA.receptor)
+AMPA_NMDA_R <- str_to_title(gene_lib$AMPA.NMDA)
+receptor_gene <- c(Monoamine_R, Neuropeptides_R, mGluR, GABA_R, AMPA_NMDA_R)
+# NT/NP
+Neurotransmitter <- str_to_title(gene_lib$Neurotransmitter)
+Neuropeptides <- str_to_title(gene_lib$Neuropeptides)
+NTNP_gene <- c(Neurotransmitter, Neuropeptides)
+
+all_gene <- c(receptor_gene, NTNP_gene)
+
+# filter
+seu <- Adult.IT.PT.barcode
+all_gene <- all_gene[which(all_gene %in% rownames(seu))]
+# gene expression filter
+all_gene_exp <- AverageExpression(
+  seu, features=all_gene, assays="RNA", slot="data", group.by="Proj_subtype"
+  )$RNA
+all_gene_exp <- as.data.frame(log1p(all_gene_exp))
+all_gene_exp$max <- apply(all_gene_exp, 1, max)
+# gene cell percentage filter
+all_gene_pct <- as.data.frame(t(as.matrix(seu@assays$RNA@data[all_gene,])))
+all_gene_pct$Proj_subtype <- as.character(seu$Proj_subtype)
+all_gene_pct <- 
+  all_gene_pct |>
+  dplyr::group_by(Proj_subtype) |>
+  dplyr::summarize(across(1:length(all_gene), function(x){
+    length(which(x>0))/length(x)
+    })) |>
+  as.data.frame()
+rownames(all_gene_pct) <- all_gene_pct$Proj_cluster
+all_gene_pct <- as.data.frame(t(all_gene_pct[,-1]))
+colnames(all_gene_pct) <- 1:33
+all_gene_pct$max <- apply(all_gene_pct, 1, max)
+
+all_gene <- all_gene[which(all_gene_exp$max>0.1 & all_gene_pct$max>0.1)]
+
+#
+Monoamine_R <- Monoamine_R[which(Monoamine_R %in% all_gene)]
+Neuropeptides_R <- Neuropeptides_R[which(Neuropeptides_R %in% all_gene)]
+mGluR <- mGluR[which(mGluR %in% all_gene)]
+GABA_R <- GABA_R[which(GABA_R %in% all_gene)]
+AMPA_NMDA_R <- AMPA_NMDA_R[which(AMPA_NMDA_R %in% all_gene)]
+#
+Neurotransmitter <- Neurotransmitter[which(Neurotransmitter %in% all_gene)]
+Neuropeptides <- Neuropeptides[which(Neuropeptides %in% all_gene)]
+#
+receptor_gene <- receptor_gene[which(receptor_gene %in% all_gene)]
+NTNP_gene <- NTNP_gene[which(NTNP_gene %in% all_gene)]
+```
+
+
+## Figure5_A
+
+```{r}
+#| eval: false
+
+Barcode <- c('VIS-I','SSp-I','CP-I','AUD-I','RSP-I',
+              'BLA-I','ACB-I','ENTl-I','AId-I','ECT-I',
+              'ACB-C','PL-C','ECT-C','ENTl-C',
+              'BLA-C','CP-C','AId-C','RSP-C',
+             'MD-I','RE-I','DR-I','VTA-I','LHA-I','SC-I')
+Proj_subtype <- c("1","14","17","22","23","25","26","27","28","29","31",
+                  "7","8","9","10","15","16","18","19","20","21",
+                  "2","3","11","12","13","24","30","32","33",
+                  "4","5","6")
+seu <- Adult.IT.PT.barcode
+pct_mat <- matrix(nrow = 33, ncol = length(Barcode))
+rownames(pct_mat) <- Proj_subtype
+colnames(pct_mat) <- Barcode
+for (i in 1:nrow(pct_mat)){
+  for (j in 1:ncol(pct_mat)){
+    pct_mat[i,j] <- length(which(seu@meta.data[,Barcode[j]]>0 & 
+                                 seu$Proj_subtype == rownames(pct_mat)[i]))/
+      length(which(seu$Proj_subtype == rownames(pct_mat)[i]))
+  }
+}
+#write.csv(pct_mat, '../pdf/Figure5/Figure5_A/pct_mat.csv')
+```
+
+
+```{r fig.width=15, fig.height=0.5}
+Proj_subtype <- c("1","14","17","22","23","25","26","27","28","29","31",
+                  "7","8","9","10","15","16","18","19","20","21",
+                  "2","3","11","12","13","24","30","32","33",
+                  "4","5","6")
+seu <- Adult.IT.PT.barcode
+seu$Proj_subtype <- factor(seu$Proj_subtype, levels = Proj_subtype)
+avgexp <- AverageExpression(seu, features = receptor_gene,
+                            group.by = "Proj_subtype", assays = "RNA")
+avgexp <- avgexp$RNA
+avgexp <- scale(t(avgexp))
+breaks <- seq(0,1,0.01)
+
+Figure5_A_1 <- 
+  pheatmap::pheatmap(
+    t(avgexp),
+    breaks = breaks, border_color = NA, show_rownames=F, show_colnames = F,
+    color = colorRampPalette(c("white","#D73027"))(length(breaks)),
+    cluster_cols = F, cluster_rows = T,
+    gaps_col = c(1:32), legend=F, treeheight_row=F
+    )
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_A/Figure5_A_1.png", plot = Figure_5A_1,
+       height = 0.5, width = 15, units = "in")
+```
+
+
+```{r fig.width=15, fig.height=0.5}
+seu <- Adult.IT.PT.barcode
+seu$Proj_subtype <- factor(seu$Proj_subtype, levels = Proj_subtype)
+avgexp <- AverageExpression(seu, features = NTNP_gene,
+                            group.by = "Proj_subtype", assays = "RNA")
+avgexp <- avgexp$RNA
+avgexp <- scale(t(avgexp))
+breaks <- seq(0,1,0.01)
+
+Figure5_A_2 <- 
+  pheatmap::pheatmap(
+    t(avgexp),
+    breaks = breaks, border_color = NA, show_rownames=F, show_colnames = F,
+    color = colorRampPalette(c("white","#4575B4"))(length(breaks)),
+    cluster_cols = F, cluster_rows = T,
+    gaps_col = c(1:32), legend=F, treeheight_row=F
+    )
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_A/Figure_5A_2.png", plot = Figure_5A_2,
+       height = 0.5, width = 15, units = "in")
+```
+
+```{r}
+knitr::include_graphics("images/Figure5_A.png", dpi = 300)
+```
+
+
+## Figure5_B
+
+```{r}
+seu <- Adult.IT.PT.barcode
+seu$ITPT <- "IT"
+seu$ITPT[which(seu$Proj_module == "PTi")] <- "PT"
+Idents(seu) <- "ITPT"
+DefaultAssay(seu) <- "RNA"
+```
+
+
+```{r fig.width=3, fig.height=2}
+features <- rev(c("Gria4","Grm3","Htr2a","Htr5a","Htr1b","Drd1","Npy1r","Cckbr","Npr3","Mchr1","Mc4r"))
+exp <- AverageExpression(seu, features = features, assays = "RNA", slot = "data")
+exp <- exp$RNA
+exp <- as.data.frame(exp)
+exp <- apply(exp, 1, function(x){x/max(x)})
+exp <- as.data.frame(exp)
+exp$Group <- rownames(exp)
+df_exp <- pivot_longer(exp, !Group, names_to = "Gene", values_to = "EXP")
+
+pct <- matrix(nrow = 2, ncol = length(features))
+pct[1,] <- apply(seu@assays$RNA@data[features,seu$ITPT=="IT"],1,function(x){
+  length(which(x>0))/length(x)
+})
+pct[2,] <- apply(seu@assays$RNA@data[features,seu$ITPT=="PT"],1,function(x){
+  length(which(x>0))/length(x)
+})
+rownames(pct) <- c("IT","PT")
+colnames(pct) <- features
+pct <- as.data.frame(pct)
+pct$Group <- rownames(pct)
+df_pct <- pivot_longer(pct,!Group, names_to = "Gene", values_to = "PCT")
+
+df <- data.frame(
+  "Group" = df_exp$Group,
+  "Gene" = df_exp$Gene,
+  "EXP" = df_exp$EXP,
+  "PCT" = df_pct$PCT
+)
+df$Group <- factor(df$Group, levels = c("IT","PT"))
+
+Figure5_B_1 <- 
+  Biorplot::Bior_DotPlot(
+    data = df, x = "Gene", y = "Group", size="PCT", color = "EXP",
+    x.text.col = FALSE, ggtheme = theme_bw()) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(x="",y="") +
+  scale_color_gradientn(colours = c("lightblue3", "lightblue", "white", "red", "red4")) +
+  scale_size_continuous(range = c(1,6))
+
+Figure5_B_1
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_B_1.pdf", plot = Figure5_B_1,
+       height = 2, width = 3, units = "in")
+```
+
+
+
+```{r fig.width=3, fig.height=2}
+features <- rev(c(c("Cck","Penk","Adcyap1","Grp","Pdyn")))
+features <- rev(c(c("Cck","Penk","Npy","Sst","Nppc","Gad1","Gad2","Slc17a7","Dbi","Slc17a6","Grp","Adcyap1","Pdyn")))
+features <- rev(c(c("Cck","Penk","Npy","Sst","Nppc","Slc17a7","Dbi","Slc17a6","Grp","Adcyap1","Pdyn")))
+exp <- AverageExpression(seu, features = features, assays = "RNA", slot = "data")
+exp <- exp$RNA
+exp <- as.data.frame(exp)
+exp <- apply(exp, 1, function(x){x/max(x)})
+exp <- as.data.frame(exp)
+exp$Group <- rownames(exp)
+df_exp <- pivot_longer(exp, !Group, names_to = "Gene", values_to = "EXP")
+
+pct <- matrix(nrow = 2, ncol = length(features))
+pct[1,] <- apply(seu@assays$RNA@data[features,seu$ITPT=="IT"],1,function(x){
+  length(which(x>0))/length(x)
+})
+pct[2,] <- apply(seu@assays$RNA@data[features,seu$ITPT=="PT"],1,function(x){
+  length(which(x>0))/length(x)
+})
+rownames(pct) <- c("IT","PT")
+colnames(pct) <- features
+pct <- as.data.frame(pct)
+pct$Group <- rownames(pct)
+df_pct <- pivot_longer(pct,!Group, names_to = "Gene", values_to = "PCT")
+
+df <- data.frame(
+  "Group" = df_exp$Group,
+  "Gene" = df_exp$Gene,
+  "EXP" = df_exp$EXP,
+  "PCT" = df_pct$PCT
+)
+df$Group <- factor(df$Group, levels = c("IT","PT"))
+
+Figure5_B_2 <- 
+  Biorplot::Bior_DotPlot(
+    data = df, x = "Gene", y = "Group", size="PCT", color = "EXP",
+    x.text.col = FALSE, ggtheme = theme_bw()) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(x="",y="") +
+  scale_color_gradientn(colours = c("lightblue3", "lightblue", "white", "red", "red4")) +
+  scale_size_continuous(range = c(1,6))
+
+Figure5_B_2
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_B_2.pdf", plot = Figure5_B_2,
+       height = 2, width = 3, units = "in")
+```
+
+
+
+
+
+## Figure5_C
+
+```{r}
+seu <- subset(Adult.IT.PT.barcode, cells = colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$Proj_module %in% c("ITi-D","ITi-V")
+)])
+seu$Proj_subtype <- factor(seu$Proj_subtype, levels = names(col_Proj_subtype)[1:21])
+Idents(seu) <- "Proj_subtype"
+DefaultAssay(seu) <- "RNA"
+```
+
+
+```{r fig.width=4, fig.height=4}
+features <- c("Adra1b","Chrm3","Htr2a","Oprk1","Sstr2","Rxfp1","Cnr1","Ntsr1","Grm1",
+              "Grm2","Grm3","Grin3a")
+exp <- AverageExpression(seu, features = features, assays = "RNA", slot = "data")
+exp <- exp$RNA
+exp <- as.data.frame(exp)
+exp <- apply(exp, 1, function(x){x/max(x)})
+exp <- as.data.frame(exp)
+exp$Group <- rownames(exp)
+df_exp <- pivot_longer(exp, !Group, names_to = "Gene", values_to = "EXP")
+
+pct <- matrix(nrow = 21, ncol = length(features))
+rownames(pct) <- rownames(exp)
+colnames(pct) <- features
+for (i in 1:21){
+  pct[i,] <- apply(seu@assays$RNA@data[features,seu$Proj_subtype==rownames(pct)[i]], 1,
+                   function(x){
+                     length(which(x>0))/length(x)
+                     })
+}
+pct <- as.data.frame(pct)
+pct$Group <- rownames(pct)
+df_pct <- pivot_longer(pct,!Group, names_to = "Gene", values_to = "PCT")
+
+df <- data.frame(
+  "Group" = df_exp$Group,
+  "Gene" = df_exp$Gene,
+  "EXP" = df_exp$EXP,
+  "PCT" = df_pct$PCT
+)
+df$Group <- factor(df$Group, levels = rev(names(col_Proj_subtype)[1:21]))
+
+Figure5_C_1 <- 
+  Biorplot::Bior_DotPlot(
+    data = df, x = "Gene", y = "Group", size="PCT", color = "EXP",
+    x.text.col = FALSE, ggtheme = theme_bw()) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(x="",y="") +
+  scale_color_gradientn(colours = c("lightblue3", "lightblue", "white", "red", "red4")) +
+  scale_size_continuous(range = c(1,4))
+
+Figure5_C_1
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_C_1.pdf", plot = Figure5_C_1,
+       height = 4, width = 4, units = "in")
+```
+
+
+```{r fig.width=4, fig.height=4}
+BC_order <- rev(c('CP-I','VIS-I','SSp-I','RSP-I','AUD-I',
+             'ACB-I','AId-I','BLA-I','ECT-I','ENTl-I'))
+
+seu <- Adult.Ex.barcode
+seu@meta.data[,BC_order][is.na(seu@meta.data[,BC_order])] <- 0
+seu$Proj_subtype <- factor(
+  seu$Proj_subtype,
+  levels = rev(c(1,14,17,22,23,25,26,27,28,29,31,
+             7,8,9,10,15,16,18,19,20,21,
+             2,3,11,12,13,24,30,32,33,
+             4,5,6)))
+
+Figure5_C_2 <- 
+  DotPlot(subset(seu, cells = colnames(seu)[which(seu$Proj_module %in% c("ITi-D","ITi-V"))]), features = BC_order, group.by = 'Proj_subtype',
+          dot.scale = 4,
+          cols = c("lightgrey", "red")) + 
+  scale_x_discrete(limits=rev) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(x='', y='')
+
+Figure5_C_2
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_C_2.pdf", plot = Figure5_C_2,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+```{r}
+seu <- subset(Adult.IT.PT.barcode, cells = colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$Proj_module %in% c("ITi-D","ITi-V")
+)])
+seu$Proj_subtype <- factor(seu$Proj_subtype, levels = names(col_Proj_subtype)[1:21])
+Idents(seu) <- "Proj_subtype"
+DefaultAssay(seu) <- "RNA"
+```
+
+```{r fig.width=2, fig.height=4}
+features <- c("Slc17a6","Adcyap1","Grp","Npy","Penk","Nos1")
+exp <- AverageExpression(seu, features = features, assays = "RNA", slot = "data")
+exp <- exp$RNA
+exp <- as.data.frame(exp)
+exp <- apply(exp, 1, function(x){x/max(x)})
+exp <- as.data.frame(exp)
+exp$Group <- rownames(exp)
+df_exp <- pivot_longer(exp, !Group, names_to = "Gene", values_to = "EXP")
+
+pct <- matrix(nrow = 21, ncol = length(features))
+rownames(pct) <- rownames(exp)
+colnames(pct) <- features
+for (i in 1:21){
+  pct[i,] <- apply(seu@assays$RNA@data[features,seu$Proj_subtype==rownames(pct)[i]], 1,
+                   function(x){
+                     length(which(x>0))/length(x)
+                     })
+}
+pct <- as.data.frame(pct)
+pct$Group <- rownames(pct)
+df_pct <- pivot_longer(pct,!Group, names_to = "Gene", values_to = "PCT")
+
+df <- data.frame(
+  "Group" = df_exp$Group,
+  "Gene" = df_exp$Gene,
+  "EXP" = df_exp$EXP,
+  "PCT" = df_pct$PCT
+)
+df$Group <- factor(df$Group, levels = rev(names(col_Proj_subtype)[1:21]))
+
+Figure5_C_3 <- 
+  Biorplot::Bior_DotPlot(
+    data = df, x = "Gene", y = "Group", size="PCT", color = "EXP",
+    x.text.col = FALSE, ggtheme = theme_bw()) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12),
+        axis.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(x="",y="") +
+  scale_color_gradientn(colours = c("lightblue3", "lightblue", "white", "red", "red4")) +
+  scale_size_continuous(range = c(1,4))
+
+Figure5_C_3
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_C_3.pdf", plot = Figure5_C_3,
+       height = 4, width = 2, units = "in")
+```
+
+
+
+
+
+## Figure5_D
+
+```{r}
+AIdI_CPI <- colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`AId-I`>0 & Adult.IT.PT.barcode$`CP-I`>0 &
+  Adult.IT.PT.barcode$BC_num==2
+)]
+AIdI_PLC_CPC <- colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`AId-I`>0 & Adult.IT.PT.barcode$`PL-C`>0 &
+  Adult.IT.PT.barcode$`CP-C`>0 & Adult.IT.PT.barcode$BC_num==3  
+)]
+AIdI_CPI_CPC_AIdC <- colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`AId-I`>0 & Adult.IT.PT.barcode$`CP-I`>0 & 
+  Adult.IT.PT.barcode$`CP-C`>0 & Adult.IT.PT.barcode$`AId-C`>0 &
+  Adult.IT.PT.barcode$BC_num==4
+)]
+AIdI_CPI_CPC_ACBI_ACBC_AIdC <- colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`AId-I`>0 & Adult.IT.PT.barcode$`CP-I`>0 & 
+  Adult.IT.PT.barcode$`CP-C`>0 & Adult.IT.PT.barcode$`ACB-I`>0 &
+  Adult.IT.PT.barcode$`ACB-C`>0 & Adult.IT.PT.barcode$`AId-C`>0 &
+  Adult.IT.PT.barcode$BC_num==6
+)]
+AIdI_ACBI <- colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`AId-I`>0 & Adult.IT.PT.barcode$`ACB-I`>0 &
+  Adult.IT.PT.barcode$BC_num==2  
+)]
+AIdI_CPI_ACBI_BLAI_ECTI_LENTI <- colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`AId-I`>0 & Adult.IT.PT.barcode$`CP-I`>0 & 
+  Adult.IT.PT.barcode$`ACB-I`>0 & Adult.IT.PT.barcode$`BLA-I`>0 &
+  Adult.IT.PT.barcode$`ECT-I`>0 & Adult.IT.PT.barcode$`ENTl-I`>0 &
+  Adult.IT.PT.barcode$BC_num==6
+)]
+
+seu <- subset(Adult.IT.PT.barcode, cells = c(
+  AIdI_CPI, AIdI_PLC_CPC, AIdI_CPI_CPC_AIdC, AIdI_CPI_CPC_ACBI_ACBC_AIdC,
+  AIdI_ACBI, AIdI_CPI_ACBI_BLAI_ECTI_LENTI))
+seu$Group <- ""
+seu$Group[colnames(seu) %in% AIdI_CPI] <- "AId-I + CP-I"
+seu$Group[colnames(seu) %in% AIdI_PLC_CPC] <- "AId-I + PL-C + CP-C"
+seu$Group[colnames(seu) %in% AIdI_CPI_CPC_AIdC] <- "AId-I + CP-I + CP-C + AId-C"
+seu$Group[colnames(seu) %in% AIdI_CPI_CPC_ACBI_ACBC_AIdC] <- "AId-I + CP-I + CP-C + ACB-I + ACB-C + AId-C"
+seu$Group[colnames(seu) %in% AIdI_ACBI] <- "AId-I + ACB-I"
+seu$Group[colnames(seu) %in% AIdI_CPI_ACBI_BLAI_ECTI_LENTI] <- "AId-I + CP-I + ACB-I + BLA-I + ECT-I + LENT-I"
+
+exp <- AverageExpression(seu, features = receptor_gene, group.by = "Group",
+                         assays = "RNA", slot = "data")
+exp <- as.data.frame(scale(t(exp$RNA)))
+```
+
+```{r fig.width=5, fig.height=4}
+Group_order <- c("AId-I + CP-I", "AId-I + PL-C + CP-C", "AId-I + CP-I + CP-C + AId-C", "AId-I + CP-I + CP-C + ACB-I + ACB-C + AId-C", "AId-I + ACB-I", "AId-I + CP-I + ACB-I + BLA-I + ECT-I + LENT-I")
+#DEGs <- unique(DEGs$gene)
+DEGs_order <- c("Gabra1","Grin2a","Gabrg2","Gabra4","Grm2","Grin1","Htr2a",
+          "Gabra3","Chrm2","Adra1b","Htr5a",
+          "Gabbr2","Sstr2","Grm8","Grik3",
+          "Npy1r","Grin3a","Grin2b","Gria1","Grik2","Grm1","Grm5","Gabra2",
+          "Trhr","Chrna4","Cnr1")
+breaks <- seq(-1,1,0.01)
+Figure5_D <- 
+  pheatmap::pheatmap(t(exp[Group_order, DEGs_order]),
+       cluster_rows = F, cluster_cols = F, border_color = "NA",
+       breaks = breaks,
+       color = colorRampPalette(c("lightblue3", "lightblue", "white", "red", "red4"))(length(breaks)),
+       #gaps_col = c(1:5),
+       fontsize_col = 6, show_colnames = T, show_rownames = T,
+       angle_col = 45
+       )
+Figure5_D
+```
+
+
+```{r fig.width=3.2, fig.height=3.5}
+features <- c("Dbi","Grp","Adcyap1","Nppc","Npy","Penk","Pdyn","Nos1","Cck","Slc17a6","Slc17a7")
+Group_order <- c("AId-I + CP-I", "AId-I + PL-C + CP-C", "AId-I + CP-I + CP-C + AId-C", "AId-I + CP-I + CP-C + ACB-I + ACB-C + AId-C", "AId-I + ACB-I", "AId-I + CP-I + ACB-I + BLA-I + ECT-I + LENT-I")
+exp <- AverageExpression(seu, features = features, group.by = "Group",
+                         assays = "RNA", slot = "data")
+exp <- exp$RNA
+exp <- as.data.frame(exp)
+exp <- apply(exp, 1, function(x){x/max(x)})
+exp <- as.data.frame(exp)
+exp$Group <- rownames(exp)
+df_exp <- pivot_longer(exp, !Group, names_to = "Gene", values_to = "EXP")
+
+pct <- matrix(nrow = 6, ncol = length(features))
+rownames(pct) <- rownames(exp)
+colnames(pct) <- features
+for (i in 1:6){
+  pct[i,] <- apply(seu@assays$RNA@data[features,seu$Group==rownames(pct)[i]], 1,
+                   function(x){
+                     length(which(x>0))/length(x)
+                     })
+}
+pct <- as.data.frame(pct)
+pct$Group <- rownames(pct)
+df_pct <- pivot_longer(pct,!Group, names_to = "Gene", values_to = "PCT")
+
+df <- data.frame(
+  "Group" = df_exp$Group,
+  "Gene" = df_exp$Gene,
+  "EXP" = df_exp$EXP,
+  "PCT" = df_pct$PCT
+)
+df$Group <- factor(df$Group, levels = Group_order)
+
+Figure5_D <- 
+  Biorplot::Bior_DotPlot(
+    data = df, x = "Gene", y = "Group", size="PCT", color = "EXP",
+    x.text.col = FALSE, ggtheme = theme_bw()) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5),
+        axis.text.y = element_text(size = 5),
+        legend.position = "none") +
+  labs(x="",y="") +
+  scale_color_gradientn(colours = c("lightblue3", "lightblue", "white", "red", "red4")) +
+  scale_size_continuous(range = c(1,4)) +
+  coord_flip()
+
+Figure5_D
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_D_dot.pdf", plot = Figure5_D,
+       height = 3.5, width = 3.2, units = "in")
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_D.pdf", plot = Figure5_D,
+       height = 4, width = 5, units = "in")
+```
+
+
+
+
+
+## Figure5_E
+
+```{r}
+GABA <- c("Gabra1","Gabra2","Gabra3","Gabra4","Gabra5","Gabrb1","Gabrb2",
+          "Gabrb3","Gabrd","Gabrg1","Gabrg2","Gabrg3","Gabbr1","Gabbr2")
+AMPA_NMDA <- c("Grin1","Grin2a","Grin2b","Grin3a","Gria1","Gria2",
+               "Gria3","Gria4")
+Grik_Grm <- c("Grik2","Grik3","Grik4","Grik5","Grm1","Grm5","Grm2","Grm3",
+         "Grm4","Grm7","Grm8")
+Amines <- c("Drd1","Htr1a","Htr1b","Htr5a","Htr2a","Htr2c",
+            "Htr7","Adra1a","Adra1b","Adra1d","Adra2a","Adra2c","Adrb1","Adrb3",
+            "Chrna4","Chrnb2","Chrm1","Chrm3","Chrm2","Hrh1","Hrh2","Hrh3")
+NP <- c("Oprd1","Oprl1","Oprk1","Oxtr","Cckbr","Sstr1","Sstr2","Sstr3","Vipr1",
+        "Crhr1","Ntsr1","Ntsr2","Npy1r","Npy2r","Npy5r","Ramp1","Ramp2","Ramp3",
+        "Npr2","Npr3","Ednra","Rxfp1","Trhr","Mchr1","Mc4r",
+        "Adipor1","Adipor2","Cnr1","Penk","Pdyn","Cck","Sst","Npy",
+        "Nppc","Grp","Adcyap1","Dbi")
+
+seu <- Adult.IT.PT.barcode
+# expression
+all_gene <- c(GABA,AMPA_NMDA,Grik_Grm,Amines,NP)
+all_gene_exp <- AverageExpression(
+  seu, assays="RNA", slot="data", features=all_gene, group.by="Proj_subtype"
+  )$RNA
+all_gene_exp <- as.data.frame(log1p(all_gene_exp))
+all_gene_exp$cv <- as.numeric(apply(all_gene_exp, 1, function(x){sd(x)/mean(x)}))
+all_gene_exp$gene_type <- ""
+all_gene_exp$gene_type[which(rownames(all_gene_exp) %in% Amines)] <- "Amines_R"
+all_gene_exp$gene_type[which(rownames(all_gene_exp) %in% NP)] <- "Neuropeptides_R"
+all_gene_exp$gene_type[which(rownames(all_gene_exp) %in% Grik_Grm)] <- "mGlu_R"
+all_gene_exp$gene_type[which(rownames(all_gene_exp) %in% GABA)] <- "GABA_R"
+all_gene_exp$gene_type[which(rownames(all_gene_exp) %in% AMPA_NMDA)] <- "AMPA_NMDA_R"
+
+# percentage
+all_gene_pct <- as.data.frame(t(as.matrix(seu@assays$RNA@data[all_gene,])))
+all_gene_pct$Proj_subtype <- seu$Proj_subtype
+all_gene_pct_mean <- 
+  all_gene_pct |>
+  dplyr::group_by(Proj_subtype) |>
+  dplyr::summarize(across(1:length(all_gene), function(x){
+    length(which(x>0))/length(x)
+    })) |>
+  as.data.frame()
+rownames(all_gene_pct_mean) <- all_gene_pct_mean$Proj_subtype
+all_gene_pct <- as.data.frame(t(all_gene_pct_mean[,-1]))
+all_gene_pct$cv <- as.numeric(apply(all_gene_pct, 1, function(x){sd(x)/mean(x)}))
+```
+
+
+```{r fig.height=4.5, fig.width=8}
+ITi_D = c(1,14,17,22,23,25,26,27,28,29,31)
+ITi_V = c(7,8,9,10,15,16,18,19,20,21)
+ITc = c(2,3,11,12,13,24,30,32,33)
+PTi = c(4,5,6)
+Proj_cluster <- c(ITi_D, ITi_V, ITc, PTi)
+
+Gria <- c("Gria1","Gria2","Gria3","Gria4")
+Htr <- c("Htr1a","Htr1b","Htr1f","Htr5a","Htr2a","Htr2c","Htr4","Htr7")
+df_plot <- all_gene_pct[which(rownames(all_gene_pct) %in% c(Gria, Htr)), 1:33]
+#df_plot <- as.data.frame(scale(t(df_plot)))
+df_plot <- as.data.frame(apply(df_plot, 1, function(x){scale(x,center=T,scale=F)}))
+df_plot$proj_cluster <- rownames(df_plot)
+df_plot <- pivot_longer(df_plot, !proj_cluster, names_to = "gene", 
+                        values_to = "value")
+df_plot$proj_cluster <- factor(df_plot$proj_cluster, levels = Proj_cluster)
+
+Figure5_E <- 
+  ggplot(df_plot, aes(x=proj_cluster, y=value, color=gene, group=gene)) +
+  geom_line() +
+  geom_point(size=2) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text = element_text(size = 15),
+        legend.title = element_blank()) +
+  scale_color_manual(values = c("#d50000","#ff1644","#ff5252","#ff8b81",
+                                "#2862ff","#2878ff","#448bff","#83b1ff",
+                                "#0c46a1","#1265c0","#1e89e5","#91cbf9")) +
+  labs(x="Projection subtype", y="Cell percent")
+Figure5_E
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_E.pdf", plot = Figure5_E,
+       height = 4.5, width = 8, units = "in")
+```
+
+
+
+
+
+## Figure5_F
+
+```{r}
+df <- data.frame(
+  gene = rownames(all_gene_exp),
+  gene_type = all_gene_exp$gene_type,
+  exp_cv = all_gene_exp$cv,
+  pct_cv = all_gene_pct$cv
+)
+df$gene_type <- factor(df$gene_type, 
+                       levels = c("Amines_R","Neuropeptides_R","mGlu_R",
+                                  "GABA_R","AMPA_NMDA_R"))
+```
+
+```{r fig.width=5, fig.height=4}
+#| warning: false
+
+Figure5_F <- 
+  ggplot(df, aes(x=gene_type, y=exp_cv, fill=gene_type)) +
+  geom_boxplot(color="black", outlier.shape = NA) +
+  scale_fill_manual(values = c(
+      "Amines_R"="#9DD0C7", "Neuropeptides_R"="#9180AC", "mGlu_R"="#D9BDD8",
+      "GABA_R"="#E58579","AMPA_NMDA_R"="#8AB1D2")) +
+  geom_jitter(color="black", size=2, alpha=0.9) +
+  theme_classic()+
+  theme(legend.position="none", text = element_text(size = 15),
+        axis.text.x = element_text(angle = 15, hjust = 1)) +
+  #geom_signif(comparisons = list(c("Amines","GABA"), c("Glu","GABA"),
+  #                               c("Amines","Glu")),
+  #            map_signif_level=TRUE, step_increase = 0.2) +
+  labs(x='',y='Expression coefficient of variation') +
+  ylim(0,1)
+Figure5_F
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_F.pdf", plot = Figure5_F,
+       height = 4, width = 5, units = "in")
+```
+
+
+
+
+
+## Figure5_G
+
+```{r fig.width=5, fig.height=4}
+#| warning: false
+
+Figure5_G <- 
+  ggplot(df, aes(x=gene_type, y=pct_cv, fill=gene_type)) +
+  geom_boxplot(color="black", outlier.shape = NA) +
+  scale_fill_manual(values = c(
+      "Amines_R"="#9DD0C7", "Neuropeptides_R"="#9180AC", "mGlu_R"="#D9BDD8",
+      "GABA_R"="#E58579","AMPA_NMDA_R"="#8AB1D2")) +
+  geom_jitter(color="black", size=2, alpha=0.9) +
+  theme_classic()+
+  theme(legend.position="none", text = element_text(size = 15),
+        axis.text.x = element_text(angle = 15, hjust = 1)) +
+  #geom_signif(comparisons = list(c("Amines","GABA"), c("Glu","GABA"),
+  #                               c("Amines","Glu")),
+  #            map_signif_level=TRUE, step_increase = 0.2) +
+  labs(x='',y='Percent coefficient of variation') +
+  ylim(0,1)
+Figure5_G
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_G.pdf", plot = Figure5_G,
+       height = 4, width = 5, units = "in")
+```
+
+
+
+
+
+## Figure5_H
+
+```{r}
+knitr::include_graphics("images/Figure5_H.png", dpi = 300)
+```
+
+
+
+
+
+## Figure5_I
+
+```{r fig.width=4, fig.height=4}
+#| warning: false
+
+seu <- sp.PFC
+df <- seu@meta.data[,c("X","Y","slice","BC_num")]
+df <- df[which(df$slice=="IT_slice_15"),]
+
+rf <- colorRampPalette(rev(brewer.pal(11,'Spectral')))
+colormap <- colorRampPalette(rev(brewer.pal(11,'Spectral')))(32)
+
+Figure5_I <- 
+  ggplot(df[df$BC_num>4,], aes(X, Y)) +
+  stat_density2d(geom = "raster", aes(fill = ..density..), contour = FALSE, 
+                 bins = 15) +
+  #geom_density_2d_filled(contour_var = "count",bins = 15) +
+  #geom_density_2d(bins = 15, colour="black", alpha=0.8) +
+  scale_fill_gradientn(colours = c("black","black",colormap)) +
+  theme_void() +
+  coord_fixed()
+Figure5_I
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_I.pdf", plot = Figure5_I,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+
+## Figure5_J
+
+```{r fig.width=5, fig.height=4}
+#| message: false
+#| warning: false
+
+seu <- Adult.IT.PT.barcode
+Idents(seu) <- "SubType"
+
+DEGs <- FindMarkers(
+  seu, ident.1="L5_IT_1", features=c(receptor_gene, NTNP_gene),
+  logfc.threshold = 0, only.pos = T)
+DEGs$Type <- ""
+DEGs$Type[which(rownames(DEGs) %in% receptor_gene)] <- "receptor"
+DEGs$Type[which(rownames(DEGs) %in% NTNP_gene)] <- "NT/NP"
+label <- c("Slc17a7","Adcyap1",
+           "Sstr2","Gabra5","Grm3","Adra1b","Gabrg2","Grm2","Grik3","Chrna4","Gabra1","Grm8","Cnr1")
+DEGs$label <- ""
+DEGs$label[match(label, rownames(DEGs))] <- label
+
+Figure5_J <- 
+  ggplot(DEGs, aes(x=avg_log2FC, y= -log10(p_val_adj))) +
+    geom_point(aes(fill=Type), shape=21, color="black" , size=3) +
+    geom_text_repel(aes(label=label, color=Type), size=5, max.overlaps=100) +
+    theme_classic() +
+    theme(plot.title = element_text(size = 20, hjust = 0.5),
+          text = element_text(size = 15), legend.position = "none") +
+    scale_fill_manual(values = c("receptor"="#E58579", "NT/NP"="#8AB1D2")) +
+    scale_color_manual(values = c("receptor"="#E58579", "NT/NP"="#8AB1D2")) +
+    #xlim(0, x_max) +
+    ylim(0,max(-log10(DEGs$p_val_adj))) +
+    scale_x_continuous(breaks=c(0,0.5,1,1.5), limits = c(0,0.5)) +
+    labs(title = "L5_IT_1 enriched gene", x = 'log2FC', y = '-log10(P value)')
+Figure5_J
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure5_J.pdf", plot = Figure5_J,
+       height = 4, width = 5, units = "in")
+```
+
+
+
+
+
+
+
+

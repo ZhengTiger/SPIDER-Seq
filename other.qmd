@@ -1,0 +1,1459 @@
+# other analysis
+
+```{r}
+#| warning: false
+#| message: false
+
+library(Seurat)
+library(scCustomize)
+library(tidyverse)
+library(cowplot)
+library(ggtree)
+library(aplot)
+library(pheatmap)
+library(ggpointdensity)
+
+source('bin/Palettes.R')
+```
+
+
+```{r}
+all.Adult <- readRDS('../data/rds/all.Adult.rds')
+Adult.Ex <- readRDS('../data/rds/Adult.Ex.rds')
+PFC.MERFISH <- readRDS('../data/rds/PFC.MERFISH.rds')
+#sp.PFC <- readRDS('../data/rds/sp.PFC.rds')
+```
+
+
+```{r}
+Adult.Ex.barcode <- subset(
+  Adult.Ex, 
+  cells=colnames(Adult.Ex)[which(Adult.Ex$BC_num>0)]
+  )
+
+Adult.IT.PT.barcode <- subset(Adult.Ex, cells=colnames(Adult.Ex)[which(
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "IT") |
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "PT" & Adult.Ex$sample == "Adult1")
+  )])
+
+Adult.IT <- subset(
+  Adult.Ex, 
+  cells=colnames(Adult.Ex)[which(Adult.Ex$Ex_subtype=="IT")]
+  )
+```
+
+
+
+
+## Movie
+
+```{r}
+#| eval: false
+
+bg3d(color = "black")
+par3d(userMatrix = rotationMatrix(-pi/6, -1, 1, 0), zoom = 0.6)
+#par3d(userMatrix = rotationMatrix(0, 0, 0, 0), zoom = 0.6)
+acr.list <- c("MOs","PL","ORBm","ACAd","ILA","DP","ACAv")
+
+for(acr in acr.list){
+  mesh <- mesh3d.allen.annot.from.id(id.from.acronym(acr))
+  #to.del <- which(mesh$vb[1,] < 0)
+  to.del <- NA
+  mesh$it <- mesh$it[,!is.element(mesh$it[1,], to.del) & !is.element(mesh$it[2,], to.del) & !is.element(mesh$it[3,], to.del)]
+  #col <- color.from.acronym(acr)
+  col <- "gray"
+  #col <- col_Region[acr]
+  wire3d(mesh, col = col, material = list(lit=FALSE), alpha = 0.2,
+          override = FALSE, meshColor = "edges")
+}
+
+df_plot <- sp.PFC@meta.data
+df_plot$AP_new <- df_plot$AP_new + runif(n= length(df_plot$AP_new), min= -1 , max= 1)*0.055555
+for (i in c(1:13)){
+  idx_cluster = rownames(df_plot)[which(
+    df_plot$SubType==names(col_SubType)[i]
+    )]
+  spheres3d(x = df_plot[idx_cluster,]$ML_new, 
+            y = df_plot[idx_cluster,]$DV_new,
+            z = df_plot[idx_cluster,]$AP_new,
+            col = col_SubType[i], radius=0.01, alpha=1)
+}
+
+# 保存
+movie3d(spin3d(axis = c(0, 1, 0)), duration = 15, dir='../movie/')
+par3d(userMatrix = rotationMatrix(0, 0, 0, 0), zoom = 0.6)
+```
+
+
+
+```{r}
+#| eval: false
+
+bg3d(color = "black")
+par3d(userMatrix = rotationMatrix(-pi/6, -1, 1, 0), zoom = 0.6)
+acr.list <- c("MOs","PL","ORBm","ACAd","ILA","DP","ACAv")
+
+for(acr in acr.list){
+  mesh <- mesh3d.allen.annot.from.id(id.from.acronym(acr))
+  #to.del <- which(mesh$vb[1,] < 0)
+  to.del <- NA
+  mesh$it <- mesh$it[,!is.element(mesh$it[1,], to.del) & !is.element(mesh$it[2,], to.del) & !is.element(mesh$it[3,], to.del)]
+  #col <- color.from.acronym(acr)
+  col <- "lightgray"
+  #col <- col_Region[acr]
+  wire3d(mesh, col = col, material = list(lit=FALSE), alpha = 0.2)
+}
+
+barcode <- c("VIS-I","ACB-I","CP-C","AId-I","CP-I","ECT-C","AId-C","ECT-I",
+             "BLA-I","AUD-I","RSP-C","SSp-I","RSP-I","ACB-C","LHA-I")
+df_plot <- sp.PFC@meta.data
+df_plot$AP_new <- df_plot$AP_new + runif(n= length(df_plot$AP_new), min= -1 , max= 1)*0.055555
+df_plot <- df_plot[df_plot$ABA_PFC=="PFC" & df_plot$BC_num>0,]
+df_plot$first_target <- barcode[apply(df_plot[,barcode], 1, which.max)]
+
+for (i in 1:length(barcode)){
+  idx_cluster = rownames(df_plot)[which(
+    df_plot$first_target==barcode[i]
+    )]
+  col <- col_Barcode[gsub('.','-',barcode[i],fixed = T)]
+  spheres3d(x = df_plot[idx_cluster,]$ML_new, 
+            y = df_plot[idx_cluster,]$DV_new,
+            z = df_plot[idx_cluster,]$AP_new,
+            col = col, radius=0.01, alpha=1)
+}
+
+# 保存
+movie3d(spin3d(axis = c(0, 1, 0)), duration = 15, dir='../movie/')
+```
+
+
+
+
+
+## 细胞比例-all
+
+```{r fig.width=5, fig.height=4}
+seu <- all.Adult
+seu$cluster <- as.character(seu$MainType)
+seu$cluster[which(seu$cluster %in% c("Astro", "Endo", "Microglia", "Oligo", "OPC"))] <- "Non-neuron"
+data <- table(seu$cluster)
+data <- data/sum(data)
+df <- data.frame(
+  cluster = names(data),
+  fraction = as.numeric(data)
+)
+df$label <- paste0(round(df$fraction,3)*100,'%')
+#df$label <- paste(df$cluster,'(', round(df$fraction,3)*100, '%', ')', sep = '')
+
+
+FigureS1_1I_1 <- 
+  ggplot(df, aes(x='', y=fraction, fill=cluster)) + 
+  geom_bar(stat="identity", width=1, color="white",
+           position = position_stack(reverse =T)) +
+  coord_polar("y", start=0) +
+  theme_void() + 
+  theme(text = element_text(size = 15),
+        plot.title = element_text(size=20, hjust = 0.5),
+        legend.title = element_blank()) +
+  geom_text(aes(x = 1.2, label = label), color = "white", size=5,
+            position = position_stack(reverse =T, vjust=0.5)) +
+  scale_fill_manual(values = col_Glu_GABA) +
+  labs(title = 'All cells')
+
+FigureS1_1I_1
+```
+
+
+
+
+
+## 细胞比例-Excitatory
+
+```{r fig.width=5, fig.height=4}
+seu <- Adult.Ex
+cluster_order <- c("L2/3_IT_1","L2/3_IT_2","L4/5_IT_1","L4/5_IT_2","L5_IT_1",
+                   "L5_IT_2","L6_IT_1","L6_IT_2","L5_PT_1","L5_PT_2","L5_NP",
+                   "L6_CT_1","L6_CT_2")
+seu$SubType <- factor(seu$SubType, levels = cluster_order)
+data <- table(seu$SubType)
+data <- data/sum(data)
+df <- data.frame(
+  cluster = names(data),
+  fraction = as.numeric(data)
+)
+df$label <- paste0(round(df$fraction,3)*100,'%')
+
+FigureS1_1I_2 <- 
+  ggplot(df, aes(x='', y=fraction, fill=cluster)) + 
+  geom_bar(stat="identity", width=1,color="white",
+           position = position_stack(reverse =T)) +
+  coord_polar("y", start=0) +
+  theme_void() + 
+  theme(text = element_text(size = 15),
+        plot.title = element_text(size=20, hjust = 0.5),
+        legend.title = element_blank()) +
+  geom_text(aes(x = 1.2, label = label), color = "black", size=5,
+            position = position_stack(reverse =T,vjust=0.5)) +
+  scale_fill_manual(values = col_SubType) +
+  labs(title = 'Excitatory')
+
+FigureS1_1I_2
+```
+
+
+
+
+
+## barcode比例-Excitatory
+
+```{r fig.width=10, fig.height=6}
+seu <- Adult.Ex
+df_fig1d <- as.data.frame(table(seu$SubType, seu$BC_label))
+colnames(df_fig1d) <- c('SubType','BC_label','Cell_num')
+df_fig1d$SubType <- 
+  factor(df_fig1d$SubType, 
+         levels = c("L2/3_IT_1","L2/3_IT_2","L4/5_IT_1","L4/5_IT_2","L5_IT_1",
+                   "L5_IT_2","L6_IT_1","L6_IT_2","L5_PT_1","L5_PT_2","L5_NP",
+                   "L6_CT_1","L6_CT_2"))
+
+FigureS1_1J <- 
+  ggplot(df_fig1d, aes(x = SubType, y = Cell_num, fill = BC_label)) + 
+  geom_bar(stat = "identity", width = 0.7) +
+  scale_fill_manual(values = col_BC_label) +
+  geom_text(aes(label = Cell_num), color = "black", size = 5,
+            position = position_stack(0.5)) +
+  labs(x='', y='', title='') +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        text = element_text(size = 15),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_blank(),
+        legend.key.size = unit(1, "cm"))
+
+FigureS1_1J
+```
+
+
+
+## 空间组barcode与非barcode转录组相关性
+
+
+```{r}
+barcode <- c('VIS-I','ACB-I','CP-C','AId-I','CP-I','ECT-C','AId-C','ECT-I',
+             'BLA-I','AUD-I','RSP-C','SSp-I','RSP-I','ACB-C','LHA-I')
+seu <- sp.PFC
+seu$BC_num <- apply(seu@meta.data[,barcode]>0,1,sum)
+seu$BC_label <- "Unbarcoded"
+seu$BC_label[which(seu$BC_num>0)] <- "Barcoded"
+seu$BC_label <- paste(seu$slice, seu$BC_label, sep = '_')
+avgexp_sp <- as.data.frame(t(as.matrix(seu@assays$RNA@counts)))
+avgexp_sp$BC_label <- seu$BC_label
+avgexp_sp <- 
+  avgexp_sp |>
+  group_by(BC_label) |>
+  dplyr::summarize(across(1:32, ~mean(.x, na.rm = TRUE))) |>
+  as.data.frame()
+avgexp_sp$BC_label <- rep(c('Barcoded','Unbarcoded'),36)
+avgexp_sp <- pivot_longer(avgexp_sp, !BC_label, names_to = "gene", values_to = "count")
+df <- data.frame(
+  'Barcoded' = avgexp_sp$count[avgexp_sp$BC_label=='Barcoded'],
+  "Unbarcoded" = avgexp_sp$count[avgexp_sp$BC_label=="Unbarcoded"]
+)
+```
+
+```{r fig.width=4, fig.height=4}
+#| message: false
+#| warning: false
+
+cor <- cor.test(df$Barcoded, df$Unbarcoded, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2) 
+
+FigureS1_1L <- 
+  ggplot(df, aes(x=Barcoded, y=Unbarcoded)) +
+  geom_smooth(method = "lm", color='red', size=0.5, se=F) +
+  geom_point(size=0.5, color='black') +
+  xlim(0,10) +
+  ylim(0,10) +
+  theme_bw() +
+  theme(panel.grid = element_blank(), text = element_text(size = 15)) +
+  labs(x='Barcoded mean expr (spatial)', y='Unbarcoded mean expr (spatial)',
+       title = paste('R =',R,',','P =',P,sep=' '))
+FigureS1_1L
+```
+
+
+
+
+
+## 单细胞和空间组转录组相关性
+
+```{r fig.width=4, fig.height=4}
+#| warning: false
+
+gene <- rownames(sp.PFC)
+sp_seu <- subset(
+  sp.PFC, 
+  cells = colnames(sp.PFC)[which(sp.PFC$ABA_hemisphere=="Left")]
+  )
+sp_exp <- AverageExpression(sp_seu, features = gene, group.by = "SubType",
+                            slot="counts")
+sp_exp <- as.numeric(log1p(sp_exp$RNA))
+#sp_exp <- log1p(rowSums(sp_seu@assays$RNA@counts[gene,]))
+#sp_exp <- sp_exp/max(sp_exp)
+
+sc_seu <- Adult.Ex
+sc_exp <- AverageExpression(sc_seu, features = gene, group.by = "SubType",
+                            slot="counts")
+sc_exp <- as.numeric(log1p(sc_exp$RNA))
+#sc_exp <- log1p(rowSums(sc_seu@assays$RNA@counts[gene,]))
+#sc_exp <- sc_exp/max(sc_exp)
+
+cor <- cor.test(sp_exp, sc_exp, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2) 
+
+df <- data.frame(
+  'sp_value' = sp_exp,
+  'sc_value' = sc_exp
+)
+
+FigureS1_1N <- 
+  ggplot(df, aes(x=sp_value, y=sc_value)) +
+  geom_point(size=2, color='black') +
+  geom_smooth(method = "lm", color='red', se = F) +
+  xlim(0,4) +
+  ylim(0,4) +
+  theme_bw() +
+  theme(panel.grid = element_blank(), text = element_text(size = 15)) +
+  labs(x='Spatial Transcriptom', y='scRNAseq Transcriptom',
+       title = paste('R =',R,',','P =',P,sep=' '))
+FigureS1_1N
+```
+
+
+
+
+
+
+## 空间组细胞比例
+
+```{r fig.width=5, fig.height=4}
+seu <- sp.PFC
+cluster_order <- c("L2/3_IT_1","L2/3_IT_2","L4/5_IT_1","L4/5_IT_2","L5_IT_1",
+                   "L5_IT_2","L6_IT_1","L6_IT_2","L5_PT_1","L5_PT_2","L5_NP",
+                   "L6_CT_1","L6_CT_2")
+seu$SubType <- factor(seu$SubType, levels = cluster_order)
+data <- table(seu$SubType)
+data <- data/sum(data)
+df <- data.frame(
+  cluster = names(data),
+  fraction = as.numeric(data)
+)
+df$label <- paste0(round(df$fraction,3)*100,'%')
+
+FigureS1_2C <- 
+  ggplot(df, aes(x='', y=fraction, fill=cluster)) + 
+  geom_bar(stat="identity", width=1,color="white",
+           position = position_stack(reverse =T)) +
+  coord_polar("y", start=0) +
+  theme_void() + 
+  theme(text = element_text(size = 15),
+        plot.title = element_text(size=20, hjust = 0.5),
+        legend.title = element_blank()) +
+  geom_text(aes(x = 1.2, label = label), color = "black", size=5,
+            position = position_stack(reverse =T,vjust=0.5)) +
+  scale_fill_manual(values = col_SubType) +
+  labs(title = 'Excitatory')
+
+FigureS1_2C
+```
+
+
+
+
+## Projection module UMAP
+
+```{r fig.width=6, fig.height=5}
+Barcode <- c('VIS-I','SSp-I','CP-I','AUD-I','RSP-I',
+             'BLA-I','ACB-I','ENTl-I','AId-I','ECT-I',
+             'ACB-C','PL-C','ECT-C','ENTl-C',
+             'BLA-C','CP-C','AId-C','RSP-C',
+             'MD-I','RE-I','DR-I','VTA-I','LHA-I','SC-I')
+Ex_BC_mat <- Adult.Ex.barcode@meta.data[,Barcode]
+Ex_BC_mat[is.na(Ex_BC_mat)] <- 0
+Ex_BC_mat <- scale(Ex_BC_mat)
+Ex_BC_mat <- Ex_BC_mat[Adult.Ex.barcode$BC_num > 1,]
+#set.seed(20230321)
+set.seed(20240422)
+umap_out <- umap(Ex_BC_mat)
+
+umap_result <- as.data.frame(umap_out$layout)
+colnames(umap_result) = c("UMAP_1","UMAP_2")
+umap_result$Proj_module <-
+  factor(Adult.Ex.barcode@meta.data[rownames(Ex_BC_mat),'Proj_module'],
+         levels = c('ITi-D', 'ITi-V', 'ITc', 'PTi'))
+label <- umap_result |>
+  group_by(Proj_module) |>
+  dplyr::summarise(UMAP_1 = median(UMAP_1), UMAP_2 = median(UMAP_2))
+
+Figure_2B <- 
+  ggplot(umap_result, aes(UMAP_1, UMAP_2, color=Proj_module, fill=Proj_module)) + 
+  geom_point(size=1, alpha=0.8) +
+  scale_color_manual(values = col_Proj_module) +
+  stat_ellipse(level = 0.95, linetype = 2, show.legend = F,
+               geom = 'polygon', alpha = 0.1) +
+  theme_dr(xlength = 0.2, ylength = 0.2,
+           arrow = grid::arrow(length = unit(0.1, "inches"),
+                               ends = 'last', type = "closed")) +
+  theme(panel.grid = element_blank()) +
+  geom_text(data = label,
+            aes(x = UMAP_1, y = UMAP_2, label = Proj_module),
+            fontface = "bold", color = 'black', size = 4) +
+  guides(color = guide_legend(override.aes = list(size = 5)))
+
+Figure_2B
+```
+
+
+
+
+## BLA/RSP-Slc24a2/Hap1
+
+```{r fig.width=4, fig.height=3}
+#seu <- subset(sp.PFC, cells=colnames(sp.PFC)[which(
+#  sp.PFC$ABA_hemisphere=="Left" & sp.PFC$slice == "IT_slice_15"
+#    )])
+seu <- subset(Adult.IT.PT.barcode, cells = colnames(Adult.IT.PT.barcode)[which(
+  Adult.IT.PT.barcode$`BLA-I`>0 | Adult.IT.PT.barcode$`RSP-I`>0
+)])
+
+mat <- matrix(nrow = 2, ncol=2)
+rownames(mat) <- c('Slc24a2','Hap1')
+colnames(mat) <- c('BLA-I','RSP-I')
+for (i in 1:2){
+  for (j in 1:2){
+    mat[i,j] <- length(which(seu@assays$RNA@data[rownames(mat)[i],]>1 & 
+                             seu@meta.data[,colnames(mat)[j]]>0))/
+                length(which(seu@assays$RNA@data[rownames(mat)[i],]>1))
+  }
+}
+mat <- as.data.frame(round(mat,2))
+mat$Gene <- rownames(mat)
+df <- pivot_longer(mat, !Gene, names_to = "Target", values_to = "Cellnum")
+
+Figure_2O <- 
+  Bior_BarPlot(df, "Gene", "Cellnum", fill = "Target", color = "Target", 
+             palette = c('RSP-I'="#6BD76BFF", 'BLA-I'="#D595A7FF"),
+             label = TRUE, position = position_dodge(0.9)) +
+  labs(x="", y="Cell Proportion") +
+  ylim(0,0.8)
+Figure_2O
+```
+
+
+
+
+## 背腹侧差异基因
+
+```{r fig.height=4, fig.width=6}
+#| warning: false
+
+L23.DV.marker <- read.csv('../data/csv/DV_marker/L23.DV.marker.csv',
+                           row.names = 1)
+L45.DV.marker <- read.csv('../data/csv/DV_marker/L45.DV.marker.csv',
+                           row.names = 1)
+L5.DV.marker <- read.csv('../data/csv/DV_marker/L5.DV.marker.csv',
+                         row.names = 1)
+L6.DV.marker <- read.csv('../data/csv/DV_marker/L6.DV.marker.csv',
+                         row.names = 1)
+DV_gene <- unique(c(rownames(L23.DV.marker), rownames(L45.DV.marker),
+                    rownames(L5.DV.marker), rownames(L6.DV.marker)))
+DV.logfc <- c()
+for (i in 1:length(DV_gene)){
+  DV.logfc[i] <- mean(c(L23.DV.marker[DV_gene[i],2],
+                         L45.DV.marker[DV_gene[i],2],
+                         L5.DV.marker[DV_gene[i],2],
+                         L6.DV.marker[DV_gene[i],2]), na.rm=T)
+}
+DV_gene <- DV_gene[order(DV.logfc, decreasing = T)]
+avg_exp <- AverageExpression(Adult.IT, features = DV_gene, group.by = 'SubType')
+avg_exp <- avg_exp$RNA
+avg_exp_zscore <- as.data.frame(t(scale(t(avg_exp))))
+
+annotation_col = data.frame(
+  IT_Subtype = factor(
+    colnames(avg_exp_zscore),
+    levels = c('L2/3_IT_1','L4/5_IT_1','L5_IT_1','L6_IT_1','L2/3_IT_2',
+               'L4/5_IT_2','L5_IT_2','L6_IT_2')),
+  D_V = rep(c("Dorsal","Ventral"),4)
+)
+rownames(annotation_col) <- colnames(avg_exp_zscore)
+annotation_colors <- list(
+  IT_Subtype = col_SubType[1:8],
+  D_V = c("Dorsal"='#1f77b4',"Ventral"='#ff7f0e')
+)
+
+breaks <- seq(-2,2,0.01)
+
+FigureS2_1G <- 
+  pheatmap(avg_exp_zscore[,levels(annotation_col$IT_Subtype)],
+           cluster_rows = F,cluster_cols = F,
+           show_colnames=F, show_rownames = F,
+           annotation_col=annotation_col,
+           annotation_colors = annotation_colors,
+           breaks = breaks,
+           color = colorRampPalette(c("navy", "white","firebrick3"))(length(breaks)),
+           border_color = NA,
+           fontsize_row=3.5
+           )
+```
+
+
+
+## 投射模式UMAP
+
+```{r}
+BLA_motif <- c("BLA-I", "BLA-I,ACB-I", "CP-I,BLA-I", "BLA-I,ACB-I,AId-I",
+               "CP-I,BLA-I,ACB-I", "CP-I,BLA-I,ACB-I,AId-I",
+               "CP-I,BLA-I,ACB-I,AId-I,ECT-I")
+```
+
+转录组UMAP
+
+```{r fig.width=35, fig.height=3}
+seu <- subset(sc_seu, cells = colnames(sc_seu)[which(
+  sc_seu$Ex_subtype == "IT" & sc_seu@reductions$umap@cell.embeddings[,"UMAP_1"]<2.5 &
+  sc_seu@reductions$umap@cell.embeddings[,"UMAP_2"]> -2.5)])
+Idents(seu) <- "BC_motif"
+
+plist <- list()
+for (i in 1:7){
+  plist[[i]] <- Cluster_Highlight_Plot(
+    seurat_object = seu, 
+    cluster_name = BLA_motif[i],
+    highlight_color = "red",  
+    pt.size = 4) +
+    coord_fixed() +
+    theme_void() +
+    NoLegend()
+  }
+Figure_3I_1 <- plot_grid(plotlist = plist, nrow = 1)
+Figure_3I_1
+```
+
+
+
+## 投射模式雷达图
+
+```{r fig.width=35, fig.height=3}
+seu <- subset(sc_seu, cells = colnames(sc_seu)[which(sc_seu$BC_motif %in% BLA_motif & sc_seu$Ex_subtype == "IT")])
+seu$SubType <- factor(
+  seu$SubType, 
+  levels = c("L2/3_IT_1","L2/3_IT_2","L4/5_IT_1","L4/5_IT_2","L5_IT_1","L5_IT_2",
+             "L6_IT_1","L6_IT_2"))
+mat <- table(seu$BC_motif, seu$SubType)
+mat <- t(apply(mat, 1, function(x){(x-min(x))/(max(x)-min(x))}))
+mat <- mat[BLA_motif,]
+mat <- as_tibble(mat, rownames = "group")
+
+plist <- list()
+for (i in 1:length(BLA_motif)){
+  plist[[i]] <- 
+    ggradar(mat[i,], fill = T,
+        group.point.size = 2, group.line.width = 0.5,
+        plot.extent.x.sf = 1.5,
+        background.circle.colour = "white", 
+        group.colours = "red")
+}
+Figure_3I_2 <- plot_grid(plotlist=plist, nrow=1)
+Figure_3I_2
+```
+
+
+
+
+
+## Figure 4J
+
+
+```{r}
+#| eval: false
+
+#bg3d(color = "white")
+bg3d(color = "black")
+par3d(userMatrix = rotationMatrix(0, 0, 0, 0), zoom = 0.7)
+acr.list <- c("MOs","PL","ORBm","ACAd","ILA","DP","ACAv")
+
+for(acr in acr.list){
+  mesh <- mesh3d.allen.annot.from.id(id.from.acronym(acr))
+  #to.del <- which(mesh$vb[1,] < 0)
+  to.del <- NA
+  mesh$it <- mesh$it[,!is.element(mesh$it[1,], to.del) & !is.element(mesh$it[2,], to.del) & !is.element(mesh$it[3,], to.del)]
+  #col <- color.from.acronym(acr)
+  col <- "lightgray"
+  #col <- col_Region[acr]
+  #wire3d(mesh, col = col, material = list(lit=FALSE), alpha = 0.2)
+  shade3d(mesh, col = col, material = list(lit=FALSE), alpha = 0.2)
+}
+
+par3d(userMatrix = rotationMatrix(0, 0, 0, 0), zoom = 0.7)
+# 保存
+rgl.snapshot('../pdf/Figure4/Figure_4J_1.png', top = TRUE)
+#movie3d(spin3d(axis = c(0, 1, 0)), duration = 15, dir='images/movie/')
+```
+
+
+```{r fig.width=6, fig.height=6}
+seu <- sp.PFC
+df <- seu@meta.data[,c("ML_new","DV_new","BC_num")]
+df_5target <- df[df$BC_num>5,]
+
+rf <- colorRampPalette(rev(brewer.pal(11,'Spectral')))
+colormap <- colorRampPalette(rev(brewer.pal(11,'Spectral')))(32)
+
+Figure_4J_2 <- 
+  ggplot(df, aes(ML_new, DV_new)) +
+  geom_point(color="black", size=1) +
+  stat_density2d(data=df_5target, geom = "raster", aes(fill = ..density..), 
+                 contour = FALSE) +
+  #geom_point(color="red") +
+  #stat_density2d(geom = "raster", aes(fill = ..density..), contour = FALSE, 
+  #               bins = 15) +
+  scale_fill_gradientn(colours = c(rep("transparent",10),colormap)) +
+  theme_void() +
+  #theme(legend.position = "none") +
+  ylim(-5,0) +
+  #xlim(0,3) +
+  coord_fixed()
+Figure_4J_2
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure_4J_2.pdf", plot = Figure_4J_2,
+       height = 6, width = 6, units = "in")
+```
+
+
+
+
+
+## Figure 4K
+
+```{r fig.width=6, fig.height=4}
+seu <- Adult.IT.PT.barcode
+df <- seu@meta.data[,c("BC_num","SubType")]
+df <- df[which(df$BC_num>5),]
+df <- as.data.frame(table(df$SubType))
+colnames(df) <- c("SubType", "Cell_num")
+df <- df[df$SubType %in% c("L2/3_IT_1","L2/3_IT_2","L4/5_IT_1","L4/5_IT_2","L5_IT_1",   "L5_IT_2","L6_IT_1", "L6_IT_2"),]
+
+Figure_4K <- 
+  ggplot(df, aes(x=SubType, y=Cell_num, fill=SubType)) +
+  geom_col() +
+  scale_fill_manual(values = col_SubType) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1, size = 12),
+        legend.position = "none") +
+  labs(x="", y="Cell number (target > 5)")
+Figure_4K
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure_4K.pdf", plot = Figure_4K,
+       height = 4, width = 6, units = "in")
+```
+
+
+
+
+
+## Figure 4L
+
+```{r}
+#seu <- Adult.IT.PT.barcode
+#single_target <- colnames(seu)[which(seu$BC_num == 1)]
+#multi_target <- colnames(seu)[which(seu$BC_num > 5)]
+#DEGs <- FindMarkers(seu, ident.1 = multi_target, ident.2 = single_target, #logfc.threshold = 0)
+#saveRDS(DEGs, '../data/rds/DEGs_1target_VS_5targets.rds')
+DEGs <- readRDS('../data/rds/DEGs_1target_VS_5targets.rds')
+```
+
+```{r fig.width=4, fig.height=3}
+DEGs$label <- ""
+DEGs <- DEGs[order(abs(DEGs$avg_log2FC),decreasing = T),]
+top5_gene <- rownames(DEGs)[which(DEGs$avg_log2FC>0.5 & DEGs$p_val_adj<1e-2)]
+if(length(top5_gene)>5){
+  top5_gene <- top5_gene[1:5]
+  }
+down5_gene <- rownames(DEGs)[which(DEGs$avg_log2FC < -0.5 &
+                                   DEGs$p_val_adj < 1e-2)]
+if(length(down5_gene)>5){
+  down5_gene <- down5_gene[1:5]
+  }
+
+#top5_gene <- c(top5_gene,"Cnr1")
+#down5_gene <- c(down5_gene,"Bdnf")
+
+DEGs$label[match(top5_gene, rownames(DEGs))] <- top5_gene
+DEGs$label[match(down5_gene, rownames(DEGs))] <- down5_gene
+DEGs$Type <- 'not significant'
+DEGs$Type[which(DEGs$avg_log2FC>0.5 & DEGs$p_val_adj<1e-2)] <- "Up"
+DEGs$Type[which(DEGs$avg_log2FC < -0.5 & DEGs$p_val_adj<1e-2)] <- "Down"
+  
+Figure_4L <- 
+  ggplot(DEGs, aes(x=avg_log2FC, y= -log10(p_val_adj))) +
+  geom_point(aes(color=Type), size=0.5) +
+  geom_vline(aes(xintercept=0.5), colour="black", linetype="dashed", 
+               linewidth = 0.5) +
+    geom_vline(aes(xintercept = -0.5), colour="black", linetype="dashed", 
+               linewidth = 0.5) +
+    geom_text_repel(aes(label=label, color=Type), size=3, max.overlaps=100) +
+    theme_classic() +
+    theme(plot.title = element_text(size = 20, hjust = 0.5),
+          text = element_text(size = 15), legend.position = "none") +
+    scale_color_manual(values = c("Up"='#c82423', "Down"='#2878b5',
+                                  'not significant'='lightgray')) +
+    xlim(-1.55, 1.55) +
+    ylim(0,150) +
+    labs(title = "", x = 'log2FC', y = '-log10(P value)')
+Figure_4L
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure_4L.pdf", plot = Figure_4L, 
+       height = 3, width = 4, units = "in")
+```
+
+
+
+
+
+## Figure 4k
+
+```{r}
+# GO
+up_DEGs <- rownames(DEGs[which(DEGs$avg_log2FC>0.5),])
+down_DEGs <- rownames(DEGs[which(DEGs$avg_log2FC < -0.5),])
+up_geneid <- bitr(up_DEGs, fromType='SYMBOL', toType='ENTREZID',
+               OrgDb='org.Mm.eg.db', drop = TRUE)
+down_geneid <- bitr(down_DEGs, fromType='SYMBOL', toType='ENTREZID',
+               OrgDb='org.Mm.eg.db', drop = TRUE)
+up_ego <- enrichGO(gene = up_geneid$ENTREZID, OrgDb = org.Mm.eg.db, 
+                   ont = 'BP', pAdjustMethod = 'BH', pvalueCutoff  = 0.01,
+                   qvalueCutoff  = 0.05, readable = TRUE)
+down_ego <- enrichGO(gene = down_geneid$ENTREZID, OrgDb = org.Mm.eg.db, 
+                     ont = 'BP', pAdjustMethod = 'BH', pvalueCutoff  = 0.01,
+                     qvalueCutoff  = 0.05, readable = TRUE)
+up_ego <- up_ego@result
+down_ego <- down_ego@result
+```
+
+```{r fig.width=10, fig.height=4}
+up_ego$Description <- factor(up_ego$Description,
+                             levels = rev(up_ego$Description))
+down_ego$Description <- factor(down_ego$Description,
+                             levels = rev(down_ego$Description))
+
+p1 <- 
+  ggplot(down_ego[1:10,], aes(Description, log(pvalue, 10))) +
+  geom_col(fill = '#1f77b4', color = 'black', width = 0.6) +
+  theme(panel.grid = element_blank(), 
+        panel.background = element_rect(fill = 'transparent')) +
+  theme(axis.line.x = element_line(colour = 'black'), 
+        axis.line.y = element_line(colour = 'transparent'), 
+        axis.ticks.y = element_line(colour = 'transparent')) +
+  theme(plot.title = element_text(hjust = 0.5, face = 'plain'),
+        text = element_text(size = 10)) +
+  coord_flip() +
+  geom_hline(yintercept = 0) +
+  labs(x = '', y = '', title = '1 targets') +
+  scale_y_continuous(limits = c(-20,0), expand = c(0, 0), 
+                     breaks = c(-15,-10,-5,0)) +
+  scale_x_discrete(position = "bottom")
+
+p2 <- 
+  ggplot(up_ego[1:10,], aes(Description, -log(pvalue, 10))) +
+  geom_col(fill = '#d62728', color = 'black', width = 0.6) +
+  theme(panel.grid = element_blank(), 
+        panel.background = element_rect(fill = 'transparent')) +
+  theme(axis.line.x = element_line(colour = 'black'), 
+        axis.line.y = element_line(colour = 'transparent'), 
+        axis.ticks.y = element_line(colour = 'transparent')) +
+  theme(plot.title = element_text(hjust = 0.5, face = 'plain'),
+        text = element_text(size = 10)) +
+  coord_flip() +
+  geom_hline(yintercept = 0) +
+  labs(x = '', y = '', title = '>5 targets') +
+  scale_y_continuous(limits = c(0,10), expand = c(0, 0), 
+                     breaks = c(0,5,10)) +
+  scale_x_discrete(position = "top")
+  
+Figure_4k <- 
+  plot_grid(p1, p2, nrow = 2, ncol = 2, 
+            rel_heights = c(9, 1), rel_widths = c(1,1),
+            labels = 'GO_Enrichment Score (-log10(p-value))', 
+            label_x = 0.35, label_y = 0, label_size = 10,
+            label_fontface = 'plain')
+Figure_4k
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure_4k.pdf", plot = Figure_4k, 
+       height = 4, width = 10, units = "in")
+```
+
+
+
+## projection module 多靶
+
+```{r fig.width=30, fig.height=6}
+Proj_module <- c("ITi-D","ITi-V","ITc","PTi")
+plist <- list()
+for (i in 1:4){
+  BC_num <- table(
+    Adult.Ex.barcode$BC_num[Adult.Ex.barcode$Proj_module==Proj_module[i]])
+  if(length(BC_num)>9){
+    BC_num1to9 <- BC_num[1:9]
+    BC_num <- c(BC_num1to9, '>9' = sum(BC_num[10:length(BC_num)]))
+  }
+  x <- BC_num/sum(BC_num)
+  labels <- paste(names(x),' targets', ' (', round(x,3)*100, '%,', BC_num, ')', sep = '')
+  df <- data.frame(Values = as.numeric(x), Labels = labels)
+  df$Labels <- factor(df$Labels, levels = labels)
+  
+  plist[[i]] <- ggplot(df, aes(x='', y=Values, fill=Labels)) + 
+    geom_bar(stat = 'identity')+
+    coord_polar(theta = 'y')+
+    theme_void() +
+    theme(text = element_text(size = 18), 
+          legend.title = element_blank(),
+          legend.key.size = unit(1, "cm"),
+          plot.margin=unit(c(0,1,0,0),'lines'),
+          plot.title = element_text(size = 50, hjust = 0.5)) +
+    scale_fill_manual(values = col_BC_num) +
+    labs(title = Proj_module[i])
+}
+FigureS4_1E <- plot_grid(plotlist = plist, ncol=4)
+FigureS4_1E
+```
+
+
+
+
+
+## 受体 hdwgcna
+
+### hdwgcna UMAP
+
+```{r}
+load("../data/csv/transmitter_and_receptor/hdwgcna.RData")
+```
+
+```{r fig.width=4, fig.height=4}
+set.seed(20240703)
+modules <- GetModules(seu)
+mods <- levels(modules$module)
+mods <- mods[mods != 'grey']
+
+Figure_5D <- 
+  HubGeneNetworkPlot(
+  seu,
+  n_hubs = 10, n_other=100,
+  edge_prop = 0.8,
+  edge.alpha = 0.8,
+  mods = mods,  
+  return_graph=FALSE
+)
+```
+
+
+### hdwgcna heatmap
+
+```{r}
+Barcode_order <- c("MD-I","RE-I","DR-I","VTA-I","LHA-I","SC-I", 
+                   "VIS-I","SSp-I","CP-I","AUD-I","RSP-I",
+                   "BLA-I","ACB-I","ENTl-I","AId-I","ECT-I",
+                   "ACB-C","PL-C","ECT-C","ENTl-C","BLA-C","CP-C","AId-C","RSP-C")
+Ex_BC_mat <- all.Adult@meta.data[colnames(seu), Barcode_order]
+Ex_BC_mat <- log1p(10000*Ex_BC_mat/seu$nCount_RNA)
+
+# 获得模块 ME 值
+m_obj <- GetMetacellObject(seu)
+MEs <- GetMEs(seu, harmonized=FALSE)
+MEs <- MEs[,-grep('grey',colnames(MEs))]
+# 获得 metacell 模块ME值
+meta_MEs <- matrix(nrow = nrow(m_obj@meta.data), ncol = ncol(MEs))
+rownames(meta_MEs) <- rownames(m_obj@meta.data)
+colnames(meta_MEs) <- colnames(MEs)
+# 获得 metacell Barcode 值
+meta_BCs <- matrix(nrow = nrow(m_obj@meta.data), ncol = length(Barcode_order))
+rownames(meta_BCs) <- rownames(m_obj@meta.data)
+colnames(meta_BCs) <- Barcode_order
+for (i in 1:nrow(meta_MEs)){
+  meta_MEs[i,] <- colMeans(MEs[strsplit(m_obj$cells_merged[[i]], ',')[[1]],], na.rm = T)
+  meta_BCs[i,] <- colMeans(Ex_BC_mat[strsplit(m_obj$cells_merged[[i]], ',')[[1]],], na.rm = T)
+}
+meta_BCs[is.nan(meta_BCs)] <- NA
+# 计算模块ME值与Barcode的相关性
+meta_R <- matrix(nrow = 4, ncol = length(Barcode_order))
+rownames(meta_R) <- c("M1","M2","M3","M4")
+colnames(meta_R) <- Barcode_order
+meta_P <- meta_R
+for (i in 1:4){
+  for (j in 1:24){
+    cor <- cor.test(meta_MEs[,rownames(meta_R)[i]], meta_BCs[,colnames(meta_R)[j]],
+                    "two.sided", "pearson")
+    meta_R[i,j] <- round(cor$estimate,2)
+    meta_P[i,j] <- format(cor$p.value, digits = 2)
+  }
+}
+meta_R <- as.data.frame(meta_R)
+meta_R$Module <- rownames(meta_R)
+df_meta_R <- pivot_longer(meta_R, !Module, names_to = "Target", values_to = "R")
+meta_P <- as.data.frame(meta_P)
+meta_P$Module <- rownames(meta_P)
+df_meta_P <- pivot_longer(meta_P, !Module, names_to = "Target", values_to = "Pvalue")
+df <- data.frame(
+  "Module" = df_meta_R$Module,
+  "Target" = df_meta_R$Target,
+  "R" = as.numeric(df_meta_R$R),
+  "Pvalue" = as.numeric(df_meta_P$Pvalue)
+)
+df$Log_Pvalue <- -log10(df$Pvalue)
+```
+
+
+```{r fig.width=8, fig.height=4}
+Barcode <- c("VIS-I","SSp-I","CP-I","AUD-I","RSP-I",
+             "BLA-I","ACB-I","ENTl-I","AId-I","ECT-I",
+             "ACB-C","PL-C","ECT-C","ENTl-C","BLA-C","CP-C","AId-C","RSP-C",
+             "MD-I","RE-I","DR-I","VTA-I","LHA-I","SC-I")
+df$Target <- factor(df$Target, levels = Barcode)
+df$Module <- factor(df$Module, levels = rev(c("M1","M2","M3","M4")))
+df$label <- ""
+df$label[which(df$R>0 & df$Pvalue < 0.05)] <- "*"
+df$label[which(df$R>0 & df$Pvalue < 0.01)] <- "**"
+df$label[which(df$R>0 & df$Pvalue < 0.001)] <- "***"
+
+breaks <- seq(-0.5,0.5,0.01)
+Figure_5E <- 
+  ggplot(df, aes(x=Target, y=Module, fill=R)) +
+  geom_tile(color="gray", size=0.5) +
+  geom_text(aes(label=label),col ="black",size = 4) +
+  #geom_vline(xintercept = c(1.5:23.5), size=1, color="lightgray") +
+  scale_fill_gradientn(limits=c(-0.5,0.5), colours = colorRampPalette(c("navy","white","firebrick3"))(100), na.value="firebrick3") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5, size = 15), 
+        axis.text.y = element_text(size = 15),
+        panel.grid = element_blank()) +
+  labs(x="", y="")
+Figure_5E
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5E.pdf", plot = Figure_5E,
+       height = 4, width = 8, units = "in")
+```
+
+
+
+### Figure 5F
+
+```{r}
+df <- as.data.frame(seu@reductions$umap@cell.embeddings)
+df$M1 <- seu@misc$Adult.IT.PT.barcode$MEs$M1
+df$M2 <- seu@misc$Adult.IT.PT.barcode$MEs$M2
+df$`AId-I` <- seu$`AId-I`
+df$`AId-I`[is.na(df$`AId-I`)] <- 0
+df$`CP-I` <- seu$`CP-I`
+df$`CP-I`[is.na(df$`CP-I`)] <- 0
+df <- df[which(seu$Ex_subtype=="IT"),]
+df <- df[df$UMAP_1 < 2 & df$UMAP_2 > -3,]
+```
+
+
+### Figure 5F_1
+
+```{r fig.width=6, fig.height=3}
+Figure_5F_1 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$M1>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","blue"),
+                        na.value = "blue",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "M1", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure_5F_1
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5F_1.pdf", plot = Figure_5F_1,
+       height = 3, width = 6, units = "in")
+```
+
+
+### Figure 5F_2
+
+```{r fig.width=6, fig.height=3}
+Figure_5F_2 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$`AId-I`>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","red"),
+                        na.value = "red",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "AId-I", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure_5F_2
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5F_2.pdf", plot = Figure_5F_2,
+       height = 3, width = 6, units = "in")
+```
+
+
+### Figure 5F_3
+
+```{r fig.width=4, fig.height=4}
+df_cor <- df[which(df$`AId-I`>0),]
+df_cor[,'exp_order'] <- rank(df_cor$M1)
+df_cor[,'bin'] <- cut(
+  df_cor[,'exp_order'],
+  seq(1, max(df_cor[,'exp_order']), length.out=11),
+  labels = c(1:10)
+  )
+df_cor <- 
+  df_cor |>
+    group_by(bin) |>
+    dplyr::summarize(across(3:6, ~ mean(.x, na.rm = TRUE)))
+
+df_cor_norm <- as.data.frame(apply(df_cor[1:10,2:ncol(df_cor)],2,function(x){
+    (x-min(x))/(max(x)-min(x))
+    }))
+df_cor_norm$x <- df_cor$bin[1:10]
+
+cor <- cor.test(df_cor_norm$M1, df_cor_norm$`AId-I`, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2)
+
+Figure_5F_3 <- 
+  ggplot(df_cor_norm, aes(x=x, y=`AId-I`, group=1)) +
+    geom_line(linewidth=1, color="blue") +
+    geom_point(fill="blue",shape=21, color="black" , size=3) +
+    geom_text(x=1, y=0.95, label = paste('R =',R,'\nP =',P,sep=' '), hjust=0,
+              color="black") +
+    scale_x_discrete(breaks = c(1,5,10), 
+                     labels = c("10%","50%","100%")) +
+    #scale_color_manual(values = col_Proj_module) +
+    #scale_fill_manual(values = col_Proj_module) +
+    labs(x=paste("M1 Eigengenes"), 
+         y=paste("AId-I projection strength"), 
+         title="") +
+    theme_classic() + 
+    theme(legend.position="none", plot.title = element_text(hjust = 0.5, size = 20),
+          text = element_text(size = 10))
+Figure_5F_3
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5F_3.pdf", plot = Figure_5F_3,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+
+### Figure 5G
+
+### Figure 5G_1
+
+```{r fig.width=6, fig.height=3}
+Figure_5G_1 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$M2>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","yellow"),
+                        na.value = "yellow",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "M2", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure_5G_1
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5G_1.pdf", plot = Figure_5G_1,
+       height = 3, width = 6, units = "in")
+```
+
+
+### Figure 5G_2
+
+```{r fig.width=6, fig.height=3}
+Figure_5G_2 <- 
+  ggplot() +
+  geom_point(df, mapping = aes(x = UMAP_1, y = UMAP_2), color="lightgray", size=1) +
+  geom_pointdensity(df[which(df$`CP-I`>0),], mapping = aes(x = UMAP_1, y = UMAP_2), size=1) +
+  scale_color_gradientn(colours = c("lightgray","white","red"),
+                        na.value = "red",
+                        limits = c(0,50),
+                        breaks = c(0,50)
+                        ) +
+  coord_fixed() +
+  theme_bw() +
+  labs(title = "CP-I", x="", y="", colour = "") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20),
+        axis.ticks = element_blank(), axis.text = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "right",
+        legend.key.width  = unit(0.5, "lines"),
+        legend.key.height = unit(2, "lines"))
+Figure_5G_2
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5G_2.pdf", plot = Figure_5G_2,
+       height = 3, width = 6, units = "in")
+```
+
+
+### Figure 5G_3
+
+```{r fig.width=4, fig.height=4}
+df_cor <- df[which(df$`CP-I`>0),]
+df_cor[,'exp_order'] <- rank(df_cor$M2)
+df_cor[,'bin'] <- cut(
+  df_cor[,'exp_order'],
+  seq(1, max(df_cor[,'exp_order']), length.out=11),
+  labels = c(1:10)
+  )
+df_cor <- 
+  df_cor |>
+    group_by(bin) |>
+    dplyr::summarize(across(3:6, ~ mean(.x, na.rm = TRUE)))
+
+df_cor_norm <- as.data.frame(apply(df_cor[1:10,2:ncol(df_cor)],2,function(x){
+    (x-min(x))/(max(x)-min(x))
+    }))
+df_cor_norm$x <- df_cor$bin[1:10]
+
+cor <- cor.test(df_cor_norm$M2, df_cor_norm$`CP-I`, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2)
+
+Figure_5G_3 <- 
+  ggplot(df_cor_norm, aes(x=x, y=`CP-I`, group=1)) +
+    geom_line(linewidth=1, color="yellow") +
+    geom_point(fill="yellow",shape=21, color="black" , size=3) +
+    geom_text(x=1, y=0.95, label = paste('R =',R,'\nP =',P,sep=' '), hjust=0,
+              color="black") +
+    scale_x_discrete(breaks = c(1,5,10), 
+                     labels = c("10%","50%","100%")) +
+    #scale_color_manual(values = col_Proj_module) +
+    #scale_fill_manual(values = col_Proj_module) +
+    labs(x=paste("M2 Eigengenes"), 
+         y=paste("CP-I projection strength"), 
+         title="") +
+    theme_classic() + 
+    theme(legend.position="none", plot.title = element_text(hjust = 0.5, size = 20),
+          text = element_text(size = 10))
+Figure_5G_3
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure5/Figure_5G_3.pdf", plot = Figure_5G_3,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+## 受体模块投射相关曲线
+
+## FigureS5_1 C
+
+```{r fig.width=8, fig.height=4}
+seu <- Adult.IT.PT.barcode
+gene <- c(PTi_gene, ITi_D_gene, ITi_V_gene)
+gene_BC_mat <- as.data.frame(seu@assays$RNA@data[gene,])
+gene_BC_mat$Gene_module <- rep(c('module 1','module 2','module 3'),
+                               c(length(PTi_gene), length(ITi_D_gene),
+                                 length(ITi_V_gene)))
+gene_BC_mat <- 
+  gene_BC_mat |>
+  group_by(Gene_module) |>
+  dplyr::summarize(across(1:ncol(seu), mean)) |>
+  as.data.frame()
+rownames(gene_BC_mat) <- gene_BC_mat$Gene_module
+gene_BC_mat <- t(gene_BC_mat[,2:ncol(gene_BC_mat)])
+gene_BC_mat <- cbind(
+  gene_BC_mat,
+  seu@meta.data[,c('PTi_score','ITi_D_score','ITi_V_score')]
+  )
+colnames(gene_BC_mat)[4:6] <- c('PTi', 'ITi-D', 'ITi-V')
+
+Gene_module <- c('module 1','module 2','module 3')
+Proj_module <- c('PTi', 'ITi-D', 'ITi-V')
+
+plist <- list()
+for (i in 1:3){
+  df_i <- gene_BC_mat[,c(Gene_module[i],'PTi', 'ITi-D', 'ITi-V')]
+  df_i <- df_i[df_i[,1]>0,]
+  df_i[,'exp_order'] <- rank(df_i[,1])
+  df_i[,'bin'] <- cut(
+    df_i[,'exp_order'],
+    seq(1, max(df_i[,'exp_order']), length.out=11),
+    labels = c(1:10))
+  df_i <- 
+    df_i |>
+    group_by(bin) |>
+    dplyr::summarize(across(2:4, ~ mean(.x, na.rm = TRUE)))
+  df_i_norm <- as.data.frame(apply(df_i[1:10,2:ncol(df_i)],2,function(x){
+    (x-min(x))/(max(x)-min(x))
+    }))
+  df_i_norm$x <- df_i$bin[1:10]
+  df_i_norm <- 
+    df_i_norm |>
+    pivot_longer(!x, names_to = 'Target', values_to = "Value")
+  df_i_norm$x <- as.numeric(df_i_norm$x)
+  df_i_norm$Target <- factor(
+    df_i_norm$Target, 
+    levels = c('PTi','ITi-D','ITi-V')
+    )
+  df_i_norm <- df_i_norm[which(df_i_norm$Target==Proj_module[i]),]
+  
+  cor <- cor.test(df_i_norm$x, df_i_norm$Value, "two.sided", "pearson")
+  R <- round(cor$estimate,2)
+  P <- format(cor$p.value, digits = 2)
+  
+  plist[[i]] <- 
+    ggplot(df_i_norm, aes(x=x, y=Value, color=Target)) +
+    geom_line(linewidth=1) +
+    geom_point(aes(fill=Target),shape=21, color="black" , size=3) +
+    geom_text(x=1, y=0.95, label = paste('R =',R,'\nP =',P,sep=' '), hjust=0,
+              color="black") +
+    scale_x_continuous(breaks = c(1,5,10), 
+                       labels = c("10%","50%","100%")) +
+    scale_color_manual(values = col_Proj_module) +
+    scale_fill_manual(values = col_Proj_module) +
+    labs(x=paste(Gene_module[i],"expression"), 
+         y=paste(Proj_module[i],"projection strength"), 
+         title=paste(Gene_module[i])) +
+    theme_classic() + 
+    theme(legend.position="none", plot.title = element_text(hjust = 0.5, size = 20),
+          text = element_text(size = 10))
+}
+
+FigureS5_1_C <- plot_grid(plotlist = plist, nrow = 1)
+FigureS5_1_C
+```
+
+
+
+## 投射模块差异受体火山图
+
+```{r}
+seu <- Adult.IT.PT.barcode
+Idents(seu) <- "Proj_module"
+DEGs <- FindAllMarkers(seu, features=all_gene, logfc.threshold = 0)
+#DEGs$p_val_adj[which(DEGs$p_val_adj==0)] <- 1e-290
+
+all_gene_DEGs <- DEGs[which(DEGs$avg_log2FC>0),]
+all_gene_DEGs$gene_type <- ""
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% Monoamine_R)] <- "Monoamine_R"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% Neuropeptides_R)] <- "Neuropeptides_R"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% mGluR)] <- "mGluR"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% GABA_R)] <- "GABA_R"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% AMPA_NMDA_R)] <- "AMPA_NMDA_R"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% Neurotransmitter)] <- "Neurotransmitter"
+all_gene_DEGs$gene_type[which(all_gene_DEGs$gene %in% Neuropeptides)] <- "Neuropeptides"
+```
+
+
+```{r fig.width=9, fig.height=3}
+proj_module <- c("PTi","ITi-D","ITi-V")
+plist <- list()
+for (i in 1:3){
+  DEGs_module <- all_gene_DEGs[all_gene_DEGs$cluster == proj_module[i],]
+  top10_gene <- DEGs_module$gene[order(DEGs_module$p_val_adj)][1:5]
+  DEGs_module$label <- ""
+  DEGs_module$label[match(top10_gene, DEGs_module$gene)] <- top10_gene
+  if (i==1){
+    x_max <- 1.5
+  }else{
+    x_max <- 1
+  }
+  plist[[i]] <- 
+    ggplot(DEGs_module, aes(x=avg_log2FC, y= -log10(p_val_adj))) +
+    geom_point(aes(fill=gene_type), shape=21, color="black" , size=3) +
+    #geom_vline(aes(xintercept=0), colour="black", linetype="dashed", 
+    #           linewidth = 0.5) +
+    geom_text_repel(aes(label=label, color=gene_type), size=5, max.overlaps=100) +
+    theme_classic() +
+    theme(plot.title = element_text(size = 20, hjust = 0.5),
+          text = element_text(size = 15), legend.position = "none") +
+    scale_fill_manual(values = c(
+      "Monoamine_R"="#9DD0C7", "Neuropeptides_R"="#9180AC", "mGluR"="#D9BDD8",
+      "GABA_R"="#E58579","AMPA_NMDA_R"="#8AB1D2",
+      "Neurotransmitter"="#d8b847", "Neuropeptides"="#1e395f")) +
+    scale_color_manual(values = c(
+      "Monoamine_R"="#9DD0C7", "Neuropeptides_R"="#9180AC", "mGluR"="#D9BDD8",
+      "GABA_R"="#E58579","AMPA_NMDA_R"="#8AB1D2",
+      "Neurotransmitter"="#d8b847", "Neuropeptides"="#1e395f")) +
+    #xlim(0, x_max) +
+    ylim(0,max(-log10(DEGs_module$p_val_adj))) +
+    scale_x_continuous(breaks=c(0,0.5,1,1.5), limits = c(0,x_max)) +
+    labs(title = proj_module[i], x = 'log2FC', y = '-log10(P value)')
+}
+FigureS5_1_D <- plot_grid(plotlist = plist, ncol = 3)
+FigureS5_1_D
+```
+
+
+
+
+
+## AG/CAM hdwgcna GO 分析
+
+```{r}
+dbs <- c('GO_Biological_Process_2021','GO_Cellular_Component_2021','GO_Molecular_Function_2021')
+seu.hdwgcna.AGMs_CAMs <- RunEnrichr(seu.hdwgcna.AGMs_CAMs, dbs=dbs,max_genes = 100)
+enrich_df <- GetEnrichrTable(seu.hdwgcna.AGMs_CAMs)
+```
+
+```{r fig.width=18, fig.height=5}
+module <- c("M1","M2","M3","M4","M5")
+col <- c("turquoise","yellow","green","blue","brown")
+plist <- list()
+for (i in 1:5){
+  df <- enrich_df[which(enrich_df$module == module[i]),]
+  df <- df[order(df$Combined.Score, decreasing = T),]
+  df <- df[1:10,]
+  df$Combined.Score.log <- log10(df$Combined.Score)
+  df$Term <- factor(df$Term, levels = rev(df$Term))
+  
+  plist[[i]] <- 
+    ggplot(df, aes(Combined.Score.log, Term)) + 
+    geom_col(fill=col[i]) +
+    geom_text(aes(x=0.05, label=Term), hjust=0) +
+    labs(x="log10(Enrichment)", y="") +
+    scale_x_continuous(expand = c(0,0)) +
+    theme_classic() +
+    theme(axis.text.y = element_blank(), 
+          axis.line.y = element_blank(),
+          axis.ticks.y = element_blank())
+}
+
+FigureS6_1_E <- plot_grid(plotlist = plist, ncol = 5)
+FigureS6_1_E
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/FigureS6_1/FigureS6_1_E.pdf", plot = FigureS6_1_E,
+       height = 5, width = 18, units = "in")
+```
+
+
+
+
+## FigureS7_B motifs 柱状图
+
+```{r fig.width=6, fig.height=4}
+Proj_motifs_counts <- Proj_motifs_counts[which(Proj_motifs_counts$Target_num>1),]
+Up_num <- sum(Proj_motifs_counts$Observed[which(Proj_motifs_counts$Significance=='Up')])
+Down_num <- sum(Proj_motifs_counts$Observed[which(Proj_motifs_counts$Significance=='Down')])
+nosign_num <- sum(Proj_motifs_counts$Observed[which(Proj_motifs_counts$Significance=='not significant')])
+
+x <- c(Up_num, Down_num, nosign_num)
+labels <- paste(c('Up','Down','not significant'), ' (', round(x/sum(x),3)*100, '%', ', ', x, ')',sep = '')
+col <- c("#FF9896FF", "#AEC7E8FF", "#C7C7C7FF")
+df <- data.frame('X'=c('Up','Down','not significant'),
+                 'Y'=c(Up_num, Down_num, nosign_num))
+df$X <- factor(df$X, levels = c('not significant','Up','Down'))
+
+FigureS7_B <- 
+  ggplot(df, aes(x=X, y=Y, fill=X)) + 
+  geom_col(width=0.7) +
+  theme_classic() +
+  theme(panel.grid = element_blank(), legend.title = element_blank(),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  scale_fill_manual(values = c( "#C7C7C7FF", "#FF9896FF", "#AEC7E8FF")) +
+  geom_text(aes(label=Y), color="black", size=4, vjust=-0.5) +
+  labs(x='', y='')
+
+FigureS7_B
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/FigureS7/FigureS7_B.pdf", plot = FigureS7_B, 
+       height = 4, width = 6, units = "in")
+```
+

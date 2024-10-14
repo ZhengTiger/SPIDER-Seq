@@ -1,0 +1,771 @@
+---
+author: "Hu Zheng"
+date: "2024-10-01"
+date-format: YYYY-MM-DD
+---
+
+# Figure4
+
+```{r}
+#| warning: false
+#| message: false
+
+library(Seurat)
+library(tidyverse)
+library(cowplot)
+library(aplot)
+library(pheatmap)
+library(ggstatsplot)
+library(ggsci)
+library(circlize)
+library(RColorBrewer)
+library(ggrepel)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+
+library(Biorplot)
+source('bin/Palettes.R')
+source('bin/includes.R')
+```
+
+
+```{r}
+Adult.Ex <- readRDS('../data/rds/Adult.Ex.rds')
+sp.PFC <- readRDS('../data/rds/sp.PFC.rds')
+```
+
+```{r}
+Adult.Ex.barcode <- subset(
+  Adult.Ex, 
+  cells=colnames(Adult.Ex)[which(Adult.Ex$BC_num>0)]
+  )
+
+Adult.IT.PT.barcode <- subset(Adult.Ex, cells=colnames(Adult.Ex)[which(
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "IT") |
+  (Adult.Ex$BC_num>0 & Adult.Ex$Ex_subtype == "PT" & Adult.Ex$sample == "Adult1")
+  )])
+```
+
+
+
+
+
+## Figure4_A
+
+```{r}
+Barcode_order <- c('VIS-I','SSp-I','CP-I','RSP-I',
+                   'BLA-I','ACB-I','ENTl-I','AId-I','ECT-I',
+                   'ACB-C','PL-C','ECT-C','ENTl-C',
+                   'BLA-C','CP-C','AId-C','RSP-C',
+                   'MD-I','RE-I','DR-I','VTA-I','LHA-I')
+Barcode_order <- Barcode_order[-match(
+  c('RSP-C','BLA-C','ECT-C','ENTl-C'),
+  Barcode_order)
+  ]
+#IT_D_BC <- c('VIS-I','SSp-I','CP-I','AUD-I','RSP-I')
+#IT_V_BC <- c('BLA-I','ACB-I','ENTl-I','AId-I','ECT-I')
+#Barcode_order <- c(IT_D_BC, IT_V_BC)
+Ex_BC_mat <- Adult.Ex.barcode@meta.data[, Barcode_order]
+Ex_BC_mat <- Ex_BC_mat[rowSums(Ex_BC_mat, na.rm=T)>0,]
+
+# Projection Motif Observed
+Proj_motifs <- as.character(apply(Ex_BC_mat, 1, function(x){
+  paste(colnames(Ex_BC_mat)[which(x>0)], collapse=',')
+  }))
+Proj_motifs_counts <- table(Proj_motifs)
+Proj_motifs_counts <- Proj_motifs_counts[order(Proj_motifs_counts, decreasing = T)]
+Proj_motifs_counts <- as.data.frame(Proj_motifs_counts)
+colnames(Proj_motifs_counts) <- c('Motif', 'Observed')
+Proj_motifs_counts$Motif <- as.character(Proj_motifs_counts$Motif)
+
+# create Null Modle
+Barcode_num <- apply(Ex_BC_mat, 2, function(x){
+  length(which(x>0))
+})
+
+fun <- function(N_total){
+  nrow(Ex_BC_mat)/N_total + 
+    cumprod(1 - Barcode_num/N_total)[length(Barcode_num)] - 1
+}
+# N_total
+root <- uniroot(fun, lower = nrow(Ex_BC_mat), upper = nrow(Ex_BC_mat)*10)
+N_total <- round(root$root)
+P_Ai_list <- Barcode_num/N_total
+# P_expected
+for (i in 1:nrow(Proj_motifs_counts)){
+  Motif_i <- strsplit(as.character(Proj_motifs_counts$Motif[i]),',')[[1]]
+  P_proj <- P_Ai_list[Motif_i]
+  P_notproj <- 1 - P_Ai_list[which(!names(P_Ai_list) %in% Motif_i)]
+  Proj_motifs_counts$P_expected[i] <-
+    cumprod(c(P_proj,P_notproj))[ncol(Ex_BC_mat)]
+  # Expected
+  Proj_motifs_counts$Expected[i] <- 
+    round(Proj_motifs_counts$P_expected[i]*N_total)
+  # two.sided binom.test
+  Proj_motifs_counts$P_value[i] <- 
+    binom.test(x=Proj_motifs_counts$Observed[i], n=N_total,
+               p=Proj_motifs_counts$P_expected[i],
+               alternative="two.sided")$p.value
+}
+# Bonferroni correction
+Proj_motifs_counts$P_Bonferroni <- p.adjust(Proj_motifs_counts$P_value,
+                                            method="bonferroni")
+# Fold Change
+Proj_motifs_counts$log2FC <- log2(Proj_motifs_counts$Observed + 1) -
+  log2(Proj_motifs_counts$Expected + 1)
+
+# Significance
+Proj_motifs_counts$Significance <- 'not significant'
+Proj_motifs_counts$Significance[which(Proj_motifs_counts$P_Bonferroni<0.01 &
+                                      Proj_motifs_counts$log2FC>1)] <- 'Up'
+Proj_motifs_counts$Significance[which(Proj_motifs_counts$P_Bonferroni<0.01 &
+                                      Proj_motifs_counts$log2FC < -1)] <- 'Down'
+
+#Proj_motifs_counts <- Proj_motifs_counts[which(Proj_motifs_counts$Observed >= 10),]
+# Target_num
+for (i in 1:nrow(Proj_motifs_counts)){
+  Proj_motifs_counts$Target_num[i] <-
+    length(strsplit(Proj_motifs_counts$Motif[i],',')[[1]])
+}
+Proj_motifs_counts <- Proj_motifs_counts[order(Proj_motifs_counts$Observed,decreasing = T),]
+# motifs targets num > 2
+Proj_motifs_counts <- Proj_motifs_counts[which(Proj_motifs_counts$Target_num>=2),]
+```
+
+
+```{r fig.height=7, fig.width=14}
+col_BC_num <- c('#5e4fa2','#3288bd','#66c2a5','#abdda4','#e6f598','#fee08b','#fdae61','#f46d43','#d53e4f','#9e0142')
+#Proj_motifs_counts <- read.csv('../result/Proj_motifs_counts.csv')
+Proj_motifs_counts <- Proj_motifs_counts[1:50,]
+Proj_motifs_Up <- Proj_motifs_counts[which(Proj_motifs_counts$Significance=='Up'),]
+Proj_motifs_Down <- Proj_motifs_counts[which(Proj_motifs_counts$Significance=='Down'),]
+Proj_motifs_No <- Proj_motifs_counts[which(Proj_motifs_counts$Significance=='not significant'),]
+y <- c(Proj_motifs_Up$Observed, Proj_motifs_Down$Observed,
+       Proj_motifs_No$Observed, Proj_motifs_Up$Expected,
+       Proj_motifs_Down$Expected, Proj_motifs_No$Expected)
+x <- c(seq(1:nrow(Proj_motifs_counts))-0.2,seq(1:nrow(Proj_motifs_counts))+0.2)
+group <- c(rep('Up', nrow(Proj_motifs_Up)),
+           rep('Down', nrow(Proj_motifs_Down)),
+           rep('not significant', nrow(Proj_motifs_No)),
+           rep('Expected', nrow(Proj_motifs_counts)))
+group <- factor(group, levels = c('Expected','Up','Down','not significant'))
+
+p1_df <- data.frame(x=x,y=y,group=group)
+p1 <- ggplot(p1_df, aes(x=x, y=y, fill=group)) + 
+  geom_bar(position="dodge", stat="identity",width = 0.4) +
+  scale_fill_manual(values = c('gray','#cd2626','#000080','black')) +
+  theme_classic() +
+  scale_x_discrete(expand=c(0.01, 0.01)) +
+  scale_y_continuous(expand = c(0.01,0.01)) +
+  theme(axis.text.x=element_blank(), axis.title.x=element_blank(),
+        axis.ticks.x=element_blank(), plot.margin = margin(0,0,0,0))+
+  labs(y='Motif cell number')
+
+x <- seq(1:nrow(Proj_motifs_counts))
+mat <- matrix(0, nrow = ncol(Ex_BC_mat), ncol = length(x))
+rownames(mat) <- colnames(Ex_BC_mat)
+colnames(mat) <- x
+sig_motifs <- c(Proj_motifs_Up$Motif, Proj_motifs_Down$Motif,
+                Proj_motifs_No$Motif)
+for (j in 1:ncol(mat)){
+  for (i in 1:nrow(mat)){
+    if (rownames(mat)[i] %in% strsplit(sig_motifs[j],',')[[1]]){
+      mat[i,j] <- 1
+    }
+  }
+}
+df_plot <- data.frame(
+  'X'=rep(1:ncol(mat), each=nrow(mat)),
+  'Y'=rep(rownames(mat), ncol(mat)),
+  'value'=as.vector(mat),
+  'Target_num'=c(rep(Proj_motifs_Up$Target_num, each=nrow(mat)),
+                 rep(Proj_motifs_Down$Target_num, each=nrow(mat)),
+                 rep(Proj_motifs_No$Target_num, each=nrow(mat)))
+  )
+
+df_plot$group <- 'NO target'
+df_plot$group[which(df_plot$value > 0)] <- paste(df_plot$Target_num[which(df_plot$value > 0)], 'targets')
+df_plot$group[which(df_plot$group == '1 targets')] <- '1 target'
+df_plot$X <- factor(df_plot$X, levels=1:length(x))
+df_plot$group <- factor(
+  df_plot$group, 
+  levels = c("NO target","2 targets","3 targets","4 targets",
+             "5 targets","6 targets"))
+for (i in 1:nrow(Proj_motifs_counts)){
+  target_i <- df_plot$Y[df_plot$X==i & df_plot$value>0]
+  target_index <- match(target_i, Barcode_order)
+  df_plot$ystart[df_plot$X==i] <- min(target_index)
+  df_plot$yend[df_plot$X==i] <- max(target_index)
+  df_plot$group_seg[df_plot$X==i] <- 
+    unique(as.character(df_plot$group[df_plot$X==i & df_plot$value>0]))
+}
+df_plot$Y <- factor(df_plot$Y, levels = Barcode_order)
+
+# change color to within-module and without-module
+#df_plot$group_module <- as.character(df_plot$group)
+#for (i in 1:nrow(df_plot)){
+#  X <- df_plot$X[i]
+#  target <- names(mat[,X][which(mat[,X]>0)])
+#  if (all(is.element(target,IT_D_BC))|all(is.element(target,IT_V_BC))){
+#    df_plot$group_module[i] <-  "within module"
+#    df_plot$group_seg[i] <- "within module"
+#  }else{
+#    df_plot$group_module[i] <-  "across module"
+#    df_plot$group_seg[i] <- "across module"
+#  }
+#}
+#df_plot$group_module[which(df_plot$group=="NO target")] <- "NO target"
+#df_plot$group_module <- factor(
+#  df_plot$group_module, levels = c("NO target","across module","within module"))
+
+p2 <- ggplot(df_plot) +
+  geom_point(aes(x=X, y=Y, colour=group), size=3) +
+  geom_segment(aes(x = X, y = ystart, xend = X, yend = yend, colour=group_seg),
+               linewidth = 0.8) +
+  theme_minimal() +
+  scale_color_manual(values = c('#d7d8da',col_BC_num)) +
+  labs(x='', y='') +
+  theme(panel.grid=element_blank(), plot.margin = margin(0,0,0,0),
+        axis.ticks.x=element_blank(), axis.text.x = element_blank(),
+        plot.title = element_blank())
+
+# Brcode num
+df_BC_num <- data.frame(
+  'Barcode' = Barcode_order,
+  'Cell_num' = 0
+)
+for (i in 1:nrow(df_BC_num)){
+  for (j in 1:nrow(Proj_motifs_counts)){
+    if (df_BC_num$Barcode[i] %in% strsplit(Proj_motifs_counts$Motif[j],',')[[1]]){
+      df_BC_num$Cell_num[i] <- df_BC_num$Cell_num[i] +
+        Proj_motifs_counts$Observed[j]
+    }
+  }
+}
+p3 <- ggplot(df_BC_num, aes(x=Barcode, y=Cell_num)) +
+  geom_bar(stat = "identity", fill='black') +
+  coord_flip() + 
+  scale_y_reverse() +
+  labs(x='', 'y'='Barcode cell number') +
+  theme_half_open() +
+  theme(axis.ticks.y = element_blank(), axis.text.y = element_blank(),
+        axis.line.y = element_blank(), 
+        text = element_text(size = 10), axis.text.x = element_text(size = 10))
+
+Figure4_A <- 
+  p2 %>%
+  insert_top(p1, height=1.5) %>%
+  insert_left(p3, width = 0.2)
+
+Figure4_A
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_A.pdf", plot = Figure4_A,
+       height = 7, width = 14, units = "in")
+```
+
+
+
+
+
+## Figure4_B
+
+```{r}
+#| eval: false
+
+#bg3d(color = "black")
+bg3d(color = "white")
+par3d(userMatrix = rotationMatrix(-pi/4, 0, 1, 0), zoom = 0.65)
+acr.list <- c("MOs","PL","ORBm","ACAd","ILA","DP","ACAv")
+
+for(acr in acr.list){
+  mesh <- mesh3d.allen.annot.from.id(id.from.acronym(acr))
+  to.del <- which(mesh$vb[1,] < 0)
+  #to.del <- NA
+  mesh$it <- mesh$it[,!is.element(mesh$it[1,], to.del) & !is.element(mesh$it[2,], to.del) & !is.element(mesh$it[3,], to.del)]
+  #col <- color.from.acronym(acr)
+  col <- "lightgray"
+  #col <- col_Region[acr]
+  wire3d(mesh, col = col, material = list(lit=FALSE), alpha = 0.2)
+}
+
+df_plot <- sp.PFC@meta.data[which(sp.PFC$ABA_hemisphere=="Left"),]
+
+# ACB-I + BLA-I
+df_plot$group <- NA
+df_plot$group[which(df_plot$`ACB-I`>0 & df_plot$`BLA-I`>0 &
+                      df_plot$BC_num==2)] <- "ACB-I + BLA-I"
+df_plot <- df_plot[which(df_plot$group %in% 'ACB-I + BLA-I'),]
+
+# CP-I + AId-I
+df_plot$group <- NA
+df_plot$group[which(df_plot$`CP-I`>0 & df_plot$`AId-I`>0 &
+                      df_plot$BC_num==2)] <- "CP-I + AId-I"
+df_plot <- df_plot[which(df_plot$group %in% 'CP-I + AId-I'),]
+
+for (i in 1){
+  df_i <- df_plot
+  col <- "blue"
+  spheres3d(x = df_i$ML_new, 
+            y = df_i$DV_new,
+            z = df_i$AP_new,
+            col = col, radius=0.02, alpha=1)
+}
+
+# save
+rgl.snapshot('../pdf/Figure4/Figure4_B/Figure4_B_3.png', top = TRUE)
+#movie3d(spin3d(axis = c(0, 1, 0)), duration = 15, dir='images/movie/')
+```
+
+
+```{r}
+Barcode_order <-  c("VIS-I","ACB-I","CP-C","AId-I","CP-I","ECT-C","AId-C","ECT-I","BLA-I","AUD-I","RSP-C","SSp-I","RSP-I","ACB-C","LHA-I")
+Ex_BC_mat <- sp.PFC@meta.data[
+  which(sp.PFC$ABA_hemisphere=="Left" & sp.PFC$BC_num>0),
+  Barcode_order
+  ]
+Ex_BC_mat <- Ex_BC_mat[rowSums(Ex_BC_mat, na.rm=T)>0,]
+
+# create Null Modle
+Barcode_num <- apply(Ex_BC_mat, 2, function(x){
+  length(which(x>0))
+})
+
+fun <- function(N_total){
+  nrow(Ex_BC_mat)/N_total + 
+    cumprod(1 - Barcode_num/N_total)[length(Barcode_num)] - 1
+}
+# N_total
+root <- uniroot(fun, lower = nrow(Ex_BC_mat), upper = nrow(Ex_BC_mat)*10)
+N_total <- round(root$root)
+P_Ai_list <- Barcode_num/N_total
+
+Exp_counts <- function(Motif){
+  P_proj <- P_Ai_list[Motif]
+  P_notproj <- 1 - P_Ai_list[which(!names(P_Ai_list) %in% Motif)]
+  P_expected <- cumprod(c(P_proj,P_notproj))[ncol(Ex_BC_mat)]
+  Expected <- as.numeric(round(P_expected*N_total))
+  return(Expected)
+}
+
+df1 <- data.frame(
+  'Type'=c('Observed','Expected'),
+  'num'=c(length(which(Ex_BC_mat$`ACB-I`>0 & Ex_BC_mat$`BLA-I`>0 &
+                         sp.PFC$BC_num[rownames(Ex_BC_mat)]==2)),
+          Exp_counts(c('ACB-I', 'BLA-I')))
+)
+df2 <- data.frame(
+  'Type'=c('Observed','Expected'),
+  'num'=c(length(which(Ex_BC_mat$`CP-I`>0 & Ex_BC_mat$`AId-I`>0 &
+                         sp.PFC$BC_num[rownames(Ex_BC_mat)]==2)),
+          Exp_counts(c('CP-I', 'AId-I')))
+)
+```
+
+
+```{r fig.width=2, fig.height=5}
+df1$Type <- factor(df1$Type, levels = c('Observed','Expected'))
+Figure4_B_2 <- 
+  ggplot(df1, aes(x=Type, y=num, fill=Type)) + 
+  geom_col(width = 0.8) +
+  labs(x='', y='Cell number') +
+  theme_classic() +
+  theme(legend.position = "none", text = element_text(size=25),
+        axis.text.x = element_text(angle = 35, hjust = 1)) +
+  scale_fill_manual(values = c('#cd2626','gray')) +
+  ylim(0,650)
+Figure4_B_2
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_B/Figure4_B_2.pdf", plot = Figure4_B_2,
+       height = 5, width = 2, units = "in")
+```
+
+
+```{r fig.width=2, fig.height=5}
+df2$Type <- factor(df2$Type, levels = c('Observed','Expected'))
+Figure4_B_4 <- 
+  ggplot(df2, aes(x=Type, y=num, fill=Type)) + 
+  geom_col(width = 0.8) +
+  labs(x='', y='Cell number') +
+  theme_classic() +
+  theme(legend.position = "none", text = element_text(size=25),
+        axis.text.x = element_text(angle = 35, hjust = 1)) +
+  scale_fill_manual(values = c('#000080','gray')) +
+  ylim(0,250)
+Figure4_B_4
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_B/Figure4_B_4.pdf", plot = Figure4_B_4,
+       height = 5, width = 2, units = "in")
+```
+
+
+
+## Figure4_C
+
+```{r}
+knitr::include_graphics("images/Figure4_C.png", dpi = 300)
+```
+
+
+
+
+
+## Figure4_D
+
+```{r}
+IT_DV <- c('VIS-I','SSp-I','CP-I','AUD-I','RSP-I',
+           'BLA-I','ACB-I','ENTl-I','AId-I','ECT-I')
+IT_DV_mat <- Adult.Ex.barcode@meta.data[,IT_DV]
+IT_DV_mat <- na.omit(IT_DV_mat)
+cor <- cor(IT_DV_mat)
+for (i in 1:10){
+  cor[i,i] <- NA
+}
+```
+
+
+```{r fig.width=6, fig.height=4}
+order <- c("CP-I","VIS-I","RSP-I","SSp-I","AUD-I","ENTl-I","ECT-I","ACB-I",
+           "BLA-I","AId-I")
+breaks <- seq(0,0.2,0.01)
+Figure4_D <- 
+  pheatmap(
+  cor[order,order],
+  cluster_rows = F, cluster_cols = F, 
+  breaks = breaks,
+  color = colorRampPalette(c("white","#cd2626"))(length(breaks)),
+  gaps_row = c(5), gaps_col = c(5),
+  legend_breaks = c(0,0.1,0.2), heatmap_legend_param = list(title = 'pearson')
+  )
+Figure4_D
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_D.pdf", plot = Figure4_D,
+       height = 4, width = 6, units = "in")
+```
+
+
+
+
+
+## Figure4_E
+
+```{r}
+IT_D_BC <- c('VIS-I','SSp-I','CP-I','AUD-I','RSP-I')
+IT_V_BC <- c('BLA-I','ACB-I','ENTl-I','AId-I','ECT-I')
+IT_DV <- c(IT_D_BC, IT_V_BC)
+IT_DV_mat <- Adult.Ex.barcode@meta.data[,IT_DV]
+IT_DV_mat <- na.omit(IT_DV_mat)
+cor <- as.data.frame(cor(IT_DV_mat))
+for (i in 1:10){
+  cor[i,i] <- NA
+}
+cor$target_A <- rownames(cor)
+cor_long <- 
+  cor |>
+  pivot_longer(!target_A, names_to = "target_B", values_to = "pearson")
+cor_long <- cor_long[which(!is.na(cor_long$pearson)),]
+cor_long$Type <- 'across module'
+cor_long$Type[(cor_long$target_A %in% IT_D_BC)&
+              (cor_long$target_B %in% IT_D_BC)] <- 'within module'
+cor_long$Type[(cor_long$target_A %in% IT_V_BC)&
+              (cor_long$target_B %in% IT_V_BC)] <- 'within module'
+```
+
+```{r fig.width=4, fig.height=4}
+#| message: false
+
+cor_long$Type <- factor(cor_long$Type, levels = c('within module', 'across module'))
+
+Figure4_E <- 
+  ggbetweenstats(
+  data = cor_long,
+  x = Type,
+  y = pearson,
+  bf.message = FALSE,
+  xlab = "",
+  ylab = "PFC to A and B (pearson)",
+  #palette = c('#cd2626','#000080'),
+  ggtheme = theme_classic()
+) + theme(legend.position = "none") +
+  scale_color_manual(values = c('#cd2626','#000080'))
+Figure4_E
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_E.pdf", plot = Figure4_E,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+
+## Figure4_F
+
+```{r}
+allen_proj_merge <- read.csv('../data/csv/Allen/connectivity_merge.csv', row.names = 1)
+#allen_proj_merge <- t(scale(t(allen_proj_merge)))
+inject_area <- c('RSP','ENT','AId','VIS','AUD','SSp','ECT','BLA')
+proj_area <- c('SSp','AUD','VIS','AId','RSP','ECT','ENT','BLA','CP','ACB')
+module1 <- c('VIS','CP','SSp','AUD','RSP')
+module2 <- c('ACB','BLA','ENT','AId','ECT')
+
+link <- matrix(nrow = length(inject_area)*length(proj_area), ncol = 6)
+colnames(link) <- c('areaA','moduleA','areaB','moduleB','value','type')
+index <- 1
+
+for (i in 1:length(inject_area)){
+  for (j in 1:length(proj_area)){
+    link[index,'areaA'] <- inject_area[i]
+    if (inject_area[i] %in% module1){
+      link[index,'moduleA'] <- 'module1'
+    }else{
+      link[index,'moduleA'] <- 'module2'
+    }
+    
+    link[index,'areaB'] <- proj_area[j]
+    if (proj_area[j] %in% module1){
+      link[index,'moduleB'] <- 'module1'
+    }else{
+      link[index,'moduleB'] <- 'module2'
+    }
+    
+    link[index,'value'] <- allen_proj_merge[inject_area[i],proj_area[j]]
+    
+    if (link[index,'moduleA']==link[index,'moduleB']){
+      link[index,'type'] <- 'within module'
+    }else{
+      link[index,'type'] <- 'across module'
+    }
+    index <- index + 1
+  }
+}
+link <- as.data.frame(link)
+link$value <- as.numeric(link$value)
+link <- link[which(link$areaA != link$areaB),]
+```
+
+```{r fig.width=4, fig.height=4}
+df <- data.frame('from'=link$areaA,
+                 'to'=link$areaB,
+                 'value'=link$value)
+
+area_order <- c('ACB','BLA','ENT','AId','ECT','VIS','CP','SSp','AUD','RSP')
+grid.col <- pal_d3("category20")(10)
+names(grid.col) <- area_order
+col <- rep("#9999cc",nrow(df))
+col[which(link$moduleA == 'module1' & link$moduleB == 'module1')] <- "#eba8a8"
+col[which(link$moduleA == 'module2' & link$moduleB == 'module2')] <- "#eba8a8"
+
+circos.clear()
+circos.par(gap.after = c(rep(5,4), 20, rep(5,4), 20))
+chordDiagram(
+  df, order = area_order, grid.col = grid.col, col = col, transparency = 0,
+  scale = TRUE, annotationTrack = c("name", "grid"))
+```
+
+```{r}
+#| eval: false
+#| message: false
+
+pdf(file="../pdf/Figure4/Figure4_F.pdf", width=4, height=4)
+circos.clear()
+circos.par(gap.after = c(rep(5,4), 20, rep(5,4), 20))
+chordDiagram(
+  df, order = area_order, grid.col = grid.col, col = col, transparency = 0,
+  scale = TRUE, annotationTrack = c("name", "grid"))
+dev.off()
+```
+
+
+
+
+
+## Figure4_G
+
+```{r fig.width=4, fig.height=4}
+allen_proj_merge <- read.csv('../data/csv/Allen/connectivity_merge.csv', row.names = 1)
+allen_proj_merge <- t(scale(t(allen_proj_merge)))
+inject_area <- c('RSP','ENT','AId','VIS','AUD','SSp','ECT','BLA')
+proj_area <- c('SSp','AUD','VIS','AId','RSP','ECT','ENT','BLA','CP','ACB')
+module1 <- c('VIS','CP','SSp','AUD','RSP')
+module2 <- c('ACB','BLA','ENT','AId','ECT')
+
+link <- matrix(nrow = length(inject_area)*length(proj_area), ncol = 6)
+colnames(link) <- c('areaA','moduleA','areaB','moduleB','value','type')
+index <- 1
+
+for (i in 1:length(inject_area)){
+  for (j in 1:length(proj_area)){
+    link[index,'areaA'] <- inject_area[i]
+    if (inject_area[i] %in% module1){
+      link[index,'moduleA'] <- 'module1'
+    }else{
+      link[index,'moduleA'] <- 'module2'
+    }
+    
+    link[index,'areaB'] <- proj_area[j]
+    if (proj_area[j] %in% module1){
+      link[index,'moduleB'] <- 'module1'
+    }else{
+      link[index,'moduleB'] <- 'module2'
+    }
+    
+    link[index,'value'] <- allen_proj_merge[inject_area[i],proj_area[j]]
+    
+    if (link[index,'moduleA']==link[index,'moduleB']){
+      link[index,'type'] <- 'within module'
+    }else{
+      link[index,'type'] <- 'across module'
+    }
+    index <- index + 1
+  }
+}
+link <- as.data.frame(link)
+link$value <- as.numeric(link$value)
+link <- link[which(link$areaA != link$areaB),]
+```
+
+
+```{r fig.width=4, fig.height=4}
+#| message: false
+
+link$type <- factor(link$type, levels = c('within module', 'across module'))
+
+Figure4_G <- 
+  ggbetweenstats(
+  data = link,
+  x = type,
+  y = value,
+  bf.message = FALSE,
+  xlab = "",
+  ylab = "A and B inter-projection strength (zscore)",
+  #palette = c('#cd2626','#000080'),
+  ggtheme = theme_classic()
+) + theme(legend.position = "none") +
+  scale_color_manual(values = c('#cd2626','#000080'))
+Figure4_G
+```
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_G.pdf", plot = Figure4_G,
+       height = 4, width = 4, units = "in")
+```
+
+
+
+
+
+## Figure4_H
+
+```{r}
+allen_proj_merge <- read.csv('../data/csv/Allen/connectivity_merge.csv', row.names = 1)
+allen_proj_merge <- t(scale(t(allen_proj_merge)))
+inject_area <- c('RSP','ENT','AId','VIS','AUD','SSp','ECT','BLA')
+proj_area <- c('SSp','AUD','VIS','AId','RSP','ECT','ENT','BLA','CP','ACB')
+module1 <- c('VIS','CP','SSp','AUD','RSP')
+module2 <- c('ACB','BLA','ENT','AId','ECT')
+
+link <- matrix(nrow = length(inject_area)*length(proj_area), ncol = 6)
+colnames(link) <- c('areaA','moduleA','areaB','moduleB','value','type')
+index <- 1
+
+for (i in 1:length(inject_area)){
+  for (j in 1:length(proj_area)){
+    link[index,'areaA'] <- inject_area[i]
+    if (inject_area[i] %in% module1){
+      link[index,'moduleA'] <- 'module1'
+    }else{
+      link[index,'moduleA'] <- 'module2'
+    }
+    
+    link[index,'areaB'] <- proj_area[j]
+    if (proj_area[j] %in% module1){
+      link[index,'moduleB'] <- 'module1'
+    }else{
+      link[index,'moduleB'] <- 'module2'
+    }
+    
+    link[index,'value'] <- allen_proj_merge[inject_area[i],proj_area[j]]
+    
+    if (link[index,'moduleA']==link[index,'moduleB']){
+      link[index,'type'] <- 'within module'
+    }else{
+      link[index,'type'] <- 'across module'
+    }
+    index <- index + 1
+  }
+}
+link <- as.data.frame(link)
+link$value <- as.numeric(link$value)
+link <- link[which(link$areaA != link$areaB),]
+link$pearson <- NA
+link$areaA[link$areaA=="ENT"] <- "ENTl"
+link$areaB[link$areaB=="ENT"] <- "ENTl"
+for (i in 1:nrow(link)){
+  link$pearson[i] <- cor_long$pearson[
+    cor_long$target_A == paste(link$areaA[i],'I',sep='-') &
+    cor_long$target_B == paste(link$areaB[i],'I',sep='-') ]
+}
+```
+
+```{r fig.width=4, fig.height=4.5}
+cor <- cor.test(link$pearson, link$value, "two.sided", "pearson")
+R <- round(cor$estimate,2)
+P <- format(cor$p.value, digits = 2)
+
+Figure4_H <- 
+  ggplot(link, aes(x=pearson, y=value)) +
+  geom_point(aes(fill=type, color=type), shape=21, size=4) +
+  geom_smooth(method = "lm", color='black') +
+  scale_fill_manual(values = c("#9999cc","#eba8a8")) +
+  scale_color_manual(values = c('#000080','#cd2626')) +
+  xlim(min(link$pearson),max(link$pearson)) +
+  ylim(min(link$value),max(link$value)) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        legend.position = "top",
+        text = element_text(size = 15),
+        axis.title.y = element_text(size = 10),
+        axis.title.x = element_text(size = 10)) +
+  labs(x='mPFC to A and B (pearson)', y='A and B inter-projection strength (zscore)',
+       title =  paste('R =',R,', P =',P,sep=' '),
+       color = '')
+Figure4_H
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/Figure4/Figure4_H.pdf", plot = Figure4_H,
+       height = 4.5, width = 4, units = "in")
+```
+
+
+
+
+
+
+
+

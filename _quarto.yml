@@ -1,0 +1,46 @@
+project:
+  type: book
+  output-dir: docs
+
+book:
+  title: "SPIDER-seq"
+  author: "Hu Zheng"
+  date: "2024-10-01"
+  date-format: YYYY-MM-DD
+  chapters:
+    - index.qmd
+
+    - part: "Main Figure"
+      chapters:
+        - Figure1.qmd
+        - Figure2.qmd
+        - Figure3.qmd
+        - Figure4.qmd
+        - Figure5.qmd
+        - Figure6.qmd
+        - Figure7.qmd
+
+    - part: "Supplemental Figure"
+      chapters:
+        - FigureS1.qmd
+        - FigureS2.qmd
+        - FigureS3.qmd
+        - FigureS4.qmd
+        - FigureS5.qmd
+        - FigureS6.qmd
+        - FigureS7.qmd
+        - FigureS8.qmd
+        - FigureS9.qmd
+        - FigureS10.qmd
+        - FigureS11.qmd
+
+bibliography: references.bib
+
+format:
+  html:
+    theme: cosmo
+    code-fold: true
+    code-tools: true
+
+
+
