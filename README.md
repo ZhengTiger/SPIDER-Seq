@@ -18,7 +18,7 @@ We developed is a shiny application **SPIDER-web** that allows users to interact
 
 ## Code View
 
-The code of this project can be viewed at <https://zhengtiger.github.io/SPIDER-seq>
+The code of this project can be viewed at <https://zhengtiger.github.io/SPIDER-Seq>
 
 
 ## Citation
