@@ -309,7 +309,7 @@ df_plot <- df_plot[which(df_plot$group %in% 'CP-I + AId-I'),]
 
 for (i in 1){
   df_i <- df_plot
-  col <- "blue"
+  col <- "#7f3f97"
   spheres3d(x = df_i$ML_new, 
             y = df_i$DV_new,
             z = df_i$AP_new,
@@ -435,6 +435,21 @@ for (i in 1:10){
 }
 ```
 
+```{r}
+cor <- matrix(nrow = 10, ncol = 10)
+colnames(cor) <- IT_DV
+rownames(cor) <- IT_DV
+p <- cor
+
+for (i in 1:10){
+  for (j in 1:10){
+    res <- cor.test(IT_DV_mat[,i],IT_DV_mat[,j])
+    cor[i,j] <- res$estimate
+    p[i,j] <- res$p.value
+  }
+}
+```
+
 
 ```{r fig.width=6, fig.height=4}
 order <- c("CP-I","VIS-I","RSP-I","SSp-I","AUD-I","ENTl-I","ECT-I","ACB-I",
@@ -503,7 +518,7 @@ Figure4_E <-
   #palette = c('#cd2626','#000080'),
   ggtheme = theme_classic()
 ) + theme(legend.position = "none") +
-  scale_color_manual(values = c('#cd2626','#000080'))
+  scale_color_manual(values = c('#cd2626','gray'))
 Figure4_E
 ```
 
@@ -571,15 +586,15 @@ df <- data.frame('from'=link$areaA,
 area_order <- c('ACB','BLA','ENT','AId','ECT','VIS','CP','SSp','AUD','RSP')
 grid.col <- pal_d3("category20")(10)
 names(grid.col) <- area_order
-col <- rep("#9999cc",nrow(df))
-col[which(link$moduleA == 'module1' & link$moduleB == 'module1')] <- "#eba8a8"
-col[which(link$moduleA == 'module2' & link$moduleB == 'module2')] <- "#eba8a8"
+col <- rep("lightgray",nrow(df))
+col[which(link$moduleA == 'module1' & link$moduleB == 'module1')] <- "#ec999a"
+col[which(link$moduleA == 'module2' & link$moduleB == 'module2')] <- "#ec999a"
 
 circos.clear()
 circos.par(gap.after = c(rep(5,4), 20, rep(5,4), 20))
 chordDiagram(
-  df, order = area_order, grid.col = grid.col, col = col, transparency = 0,
-  scale = TRUE, annotationTrack = c("name", "grid"))
+  df[order(link$type),], order = area_order, grid.col = grid.col, col = col[order(link$type)], transparency = 0,
+  scale = TRUE, annotationTrack = c("name", "grid"), link.decreasing=T)
 ```
 
 ```{r}
@@ -590,8 +605,8 @@ pdf(file="../pdf/Figure4/Figure4_F.pdf", width=4, height=4)
 circos.clear()
 circos.par(gap.after = c(rep(5,4), 20, rep(5,4), 20))
 chordDiagram(
-  df, order = area_order, grid.col = grid.col, col = col, transparency = 0,
-  scale = TRUE, annotationTrack = c("name", "grid"))
+  df[order(link$type),], order = area_order, grid.col = grid.col, col = col[order(link$type)], transparency = 0,
+  scale = TRUE, annotationTrack = c("name", "grid"), link.decreasing=T)
 dev.off()
 ```
 
@@ -661,7 +676,7 @@ Figure4_G <-
   #palette = c('#cd2626','#000080'),
   ggtheme = theme_classic()
 ) + theme(legend.position = "none") +
-  scale_color_manual(values = c('#cd2626','#000080'))
+  scale_color_manual(values = c('#cd2626','gray'))
 Figure4_G
 ```
 
@@ -738,8 +753,8 @@ Figure4_H <-
   ggplot(link, aes(x=pearson, y=value)) +
   geom_point(aes(fill=type, color=type), shape=21, size=4) +
   geom_smooth(method = "lm", color='black') +
-  scale_fill_manual(values = c("#9999cc","#eba8a8")) +
-  scale_color_manual(values = c('#000080','#cd2626')) +
+  scale_fill_manual(values = c("lightgray","#eba8a8")) +
+  scale_color_manual(values = c('gray','#cd2626')) +
   xlim(min(link$pearson),max(link$pearson)) +
   ylim(min(link$value),max(link$value)) +
   theme_bw() +

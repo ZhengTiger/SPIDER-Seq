@@ -535,10 +535,21 @@ colnames(spatial_train) <- c("x","y")
 df_MERFISH <- spatial_test
 df_MERFISH$CCF <- PFC.MERFISH$CCF_metaRegion[which(colnames(PFC.MERFISH) %in% MERFISH_cells)]
 df_MERFISH$sample <- "MERFISH"
-df_true <- sp.PFC.Left@meta.data[which(sp.PFC.Left$slice=="IT_slice_18"),c('ML_new','DV_new','ABA_metaRegion')]
-colnames(df_true) <- c('x','y','CCF')
+df_MERFISH$SubType <- PFC.MERFISH$L3_cluster[which(colnames(PFC.MERFISH) %in% MERFISH_cells)]
+df_true <- sp.PFC.Left@meta.data[which(sp.PFC.Left$slice=="IT_slice_18"),c('ML_new','DV_new','ABA_metaRegion','SubType_Layer')]
+colnames(df_true) <- c('x','y','CCF','SubType')
 df_true$sample <- "our"
 df <- merge(df_MERFISH, df_true, all = T)
+df$y_round <- round(df$y,1)
+df$noise <- ""
+for (i in unique(df$y_round)){
+  L23_x <- df$x[which(df$y_round == i & df$SubType == "L2/3 IT" & df$sample=="our")]
+  if (length(L23_x)>0){
+    L23_minx <- min(L23_x)
+    df$noise[which(df$y_round == i & df$x < L23_minx & df$sample=="our")] <- "noise"
+  }
+}
+df <- df[df$noise != "noise",]
 ```
 
 
@@ -591,6 +602,56 @@ ggsave("../pdf/Figure7/Figure7_D_2.pdf", plot = Figure7_D_2,
 
 
 
+```{r fig.width=4, fig.height=6}
+col <- c("L2/3 IT"='#ffda11', "L4/5 IT"='#f68d45', "L5 IT"='#26d5ff', 
+         "L6 IT"= '#f05a9e', "L5 ET" = '#6d92ff', "L5/6 NP"='#8976ff', 
+         "L6 CT" = '#e01fff')
+
+Figure7_D_2 <- 
+  ggplot(df[which(df$sample=="MERFISH"),], aes(x=x,y=y,color=SubType)) +
+  geom_point() +
+  coord_fixed() +
+  scale_color_manual(values = col) +
+  labs(title = "MERFISH slice") +
+  ggdark::dark_theme_void() +
+  theme(text = element_text(size = 15),
+        plot.title = element_blank(), legend.position = "none")
+Figure7_D_2
+```
+
+```{r}
+#| eval: false
+
+ggsave(paste("../pdf/Figure7/Figure7_D_1.png",sep=""), 
+       plot = Figure7_D_2,
+       height = 6, width = 6, units = "in")
+```
+
+
+```{r fig.width=4, fig.height=6}
+col <- c("L2/3 IT"='#ffda11', "L4/5 IT"='#f68d45', "L5 IT"='#26d5ff', 
+         "L6 IT"= '#f05a9e', "L5 PT" = '#6d92ff', "L5 NP"='#8976ff', 
+         "L6 CT" = '#e01fff')
+
+Figure7_D_2 <- 
+  ggplot(df[which(df$sample=="our"),], aes(x=x,y=y,color=SubType)) +
+  geom_point() +
+  coord_fixed() +
+  scale_color_manual(values = col) +
+  labs(title = "MERFISH slice") +
+  ggdark::dark_theme_void() +
+  theme(text = element_text(size = 15),
+        plot.title = element_blank(), legend.position = "none")
+Figure7_D_2
+```
+
+```{r}
+#| eval: false
+
+ggsave(paste("../pdf/Figure7/Figure7_D_2.png",sep=""), 
+       plot = Figure7_D_2,
+       height = 5, width = 5, units = "in")
+```
 
 
 ## Figure7_E
@@ -833,7 +894,7 @@ for (i in 1:length(proj_module)){
 ```{r fig.width=1.8, fig.height=4}
 #| warning: false
 
-module <- proj_module[1]
+module <- proj_module[4]
 pre_module$Module <- apply(pre_module[,proj_module], 1, function(x){
   proj_module[which.max(x)]
 })
@@ -844,7 +905,7 @@ Figure7_G_pre <-
   geom_point(pre_Barcode[which(pre_module$Module == module),], mapping=aes(x=x,y=y),
              size=0.8, color="#FFEA46FF") +
   ggdark::dark_theme_void() +
-  labs(title = module) +
+  labs(title = "") +
   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
   coord_fixed() +
   xlim(0,1.5) +
@@ -864,13 +925,23 @@ ggsave(paste("../pdf/Figure7/Figure7_G/pre_",module,".png",sep=""),
 
 
 ```{r fig.width=1.8, fig.height=4}
-module <- proj_module[1]
+module <- proj_module[4]
 slice <- 'IT_slice_18'
 
-df <- sp.PFC.Left@meta.data[,c("ML_new","DV_new","Proj_module")]
+df <- sp.PFC.Left@meta.data[,c("ML_new","DV_new","SubType_Layer","Proj_module")]
 df$Proj_module[is.na(df$Proj_module)] <- ""
-colnames(df)[1:2] <- c("x","y")
+colnames(df)[1:3] <- c("x","y","SubType")
 df <- df[which(sp.PFC.Left$slice==slice),]
+df$y_round <- round(df$y,1)
+df$noise <- ""
+for (i in unique(df$y_round)){
+  L23_x <- df$x[which(df$y_round == i & df$SubType == "L2/3 IT")]
+  if (length(L23_x)>0){
+    L23_minx <- min(L23_x)
+    df$noise[which(df$y_round == i & df$x < L23_minx)] <- "noise"
+  }
+}
+df <- df[df$noise != "noise",]
 
 Figure7_G_true <- 
   ggplot(df, aes()) +
@@ -879,7 +950,7 @@ Figure7_G_true <-
   geom_point(df[which(df$Proj_module == module),], mapping=aes(x=x,y=y),
              size=0.8, color="#FFEA46FF") +
   ggdark::dark_theme_void() +
-  labs(title = module) +
+  labs(title = "") +
   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
   coord_fixed() +
   xlim(0,1.5) +
@@ -892,7 +963,7 @@ Figure7_G_true
 #| eval: false
 
 ggsave(paste("../pdf/Figure7/Figure7_G/true_",module,".png",sep=""), 
-       plot = Figure_7G_true,
+       plot = Figure7_G_true,
        height = 4, width = 2, units = "in")
 ```
 
@@ -906,7 +977,7 @@ ggsave(paste("../pdf/Figure7/Figure7_G/true_",module,".png",sep=""),
 #| warning: false
 #| message: false
 
-i=1
+i=15
 module <- sp_Barcode[i]
 Figure7_H_pre <- 
   ggplot() +
@@ -915,7 +986,7 @@ Figure7_H_pre <-
   geom_point(pre_Barcode[which(pre_Barcode[,module]>=sp_Barcode_thread[i]),],
              mapping=aes(x=x,y=y), size=0.8, color="#FFEA46FF") +
   ggdark::dark_theme_void() +
-  labs(title = module) +
+  labs(title = "") +
   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
   coord_fixed() +
   xlim(0,1.5) +
@@ -934,13 +1005,23 @@ ggsave(paste("../pdf/Figure7/Figure7_H/pre_",module,".png",sep=""),
 
 
 ```{r fig.width=1.8, fig.height=4}
-i=1
+i=15
 module <- sp_Barcode[i]
 slice <- 'IT_slice_18'
 
-df <- sp.PFC.Left@meta.data[,c("ML_new","DV_new",sp_Barcode)]
-colnames(df)[1:2] <- c("x","y")
+df <- sp.PFC.Left@meta.data[,c("ML_new","DV_new","SubType_Layer",sp_Barcode)]
+colnames(df)[1:3] <- c("x","y","SubType")
 df <- df[which(sp.PFC.Left$slice==slice),]
+df$y_round <- round(df$y,1)
+df$noise <- ""
+for (i in unique(df$y_round)){
+  L23_x <- df$x[which(df$y_round == i & df$SubType == "L2/3 IT")]
+  if (length(L23_x)>0){
+    L23_minx <- min(L23_x)
+    df$noise[which(df$y_round == i & df$x < L23_minx)] <- "noise"
+  }
+}
+df <- df[df$noise != "noise",]
 
 Figure7_H_true <- 
   ggplot(df, aes()) +
@@ -949,7 +1030,7 @@ Figure7_H_true <-
   geom_point(df[which(df[,module]>0),], mapping=aes(x=x,y=y),
              size=0.8, color="#FFEA46FF") +
   ggdark::dark_theme_void() +
-  labs(title = module) +
+  labs(title = "") +
   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
   coord_fixed() +
   xlim(0,1.5) +

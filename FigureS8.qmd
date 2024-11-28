@@ -117,22 +117,14 @@ df <- data.frame(
   "max_pct" = as.numeric(all_gene_pct$max[match(all_gene, rownames(all_gene_exp))])
 )
 df$gene_type <- ""
-df$gene_type[which(df$gene %in% Monoamine_R)] <- "Monoamine_R"
-df$gene_type[which(df$gene %in% Neuropeptides_R)] <- "Neuropeptides_R"
-df$gene_type[which(df$gene %in% mGluR)] <- "mGluR"
-df$gene_type[which(df$gene %in% GABA_R)] <- "GABA_R"
-df$gene_type[which(df$gene %in% AMPA_NMDA_R)] <- "AMPA_NMDA_R"
-df$gene_type[which(df$gene %in% Neurotransmitter)] <- "Neurotransmitter"
-df$gene_type[which(df$gene %in% Neuropeptides)] <- "Neuropeptides"
-
+df$gene_type[which(df$gene %in% receptor_gene)] <- "Receptor"
+df$gene_type[which(df$gene %in% NTNP_gene)] <- "NT/NP"
 df$gene <- factor(df$gene, levels = df$gene[order(df$max_exp)])
+
 P1 <- 
   ggplot(df, aes(x=max_exp, y=gene, color=gene_type)) +
   geom_point() +
-  scale_color_manual(values = c("Monoamine_R"="#9DD0C7","Neuropeptides_R"="#9180AC",
-                               "mGluR"="#D9BDD8","GABA_R"="#E58579",
-                               "AMPA_NMDA_R"="#8AB1D2",
-                               "Neurotransmitter"="#d8b847", "Neuropeptides"="#1e395f")) +
+  scale_color_manual(values = c('Receptor'="#93C8C0FF",'NT/NP'="#1C3C63FF")) +
   scale_x_continuous(breaks = c(0.1,1,2,3), limits = c(0.1,3.5)) +
   theme_classic() +
   theme(axis.text.y = element_text(size = 8))
@@ -141,10 +133,7 @@ df$gene <- factor(df$gene, levels = df$gene[order(df$max_pct)])
 P2 <- 
   ggplot(df, aes(x=max_pct, y=gene, color=gene_type)) +
   geom_point() +
-  scale_color_manual(values = c("Monoamine_R"="#9DD0C7","Neuropeptides_R"="#9180AC",
-                               "mGluR"="#D9BDD8","GABA_R"="#E58579",
-                               "AMPA_NMDA_R"="#8AB1D2",
-                               "Neurotransmitter"="#d8b847", "Neuropeptides"="#1e395f")) +
+  scale_color_manual(values = c('Receptor'="#93C8C0FF",'NT/NP'="#1C3C63FF")) +
   scale_x_continuous(breaks = c(0.1,0.5,1), limits = c(0.1,1)) +
   theme_classic() +
   theme(axis.text.y = element_text(size = 8))

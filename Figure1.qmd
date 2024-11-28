@@ -26,10 +26,14 @@ source('bin/includes.R')
 all.Adult <- readRDS('../data/rds/all.Adult.rds')
 Adult.Ex <- readRDS('../data/rds/Adult.Ex.rds')
 sp.PFC <- readRDS('../data/rds/sp.PFC.rds')
+sp.all <- readRDS('../data/rds/sp.all.rds')
 ```
 
 
 
+```{r}
+"darkgray"
+```
 
 
 ## Figure_1A
@@ -242,7 +246,7 @@ knitr::include_graphics("images/Figure_1F.png", dpi = 300)
 bg3d(color = "black")
 par3d(userMatrix = rotationMatrix(-pi/6, -1, 1, 0), zoom = 0.6)
 acr.list <- c("MOs","PL","ORBm","ACAd","ILA","DP","ACAv")
-
+#acr.list <- c("root")
 for(acr in acr.list){
   mesh <- mesh3d.allen.annot.from.id(id.from.acronym(acr))
   #to.del <- which(mesh$vb[1,] < 0)

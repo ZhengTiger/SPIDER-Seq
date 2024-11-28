@@ -318,6 +318,38 @@ ggsave("../pdf/FigureS6/FigureS6_B_3.pdf", plot = FigureS6_B_3,
 
 
 
+```{r fig.width=16, fig.height=3}
+seu <- subset(seu, cells = colnames(seu)[which(seu$group != "Other" & seu$Ex_subtype == "IT")])
+seu$SubType <- factor(
+  seu$SubType, 
+  levels = c("L2/3_IT_1","L2/3_IT_2","L4/5_IT_1","L4/5_IT_2","L5_IT_1","L5_IT_2",
+             "L6_IT_1","L6_IT_2"))
+mat <- table(seu$group, seu$SubType)
+mat <- t(apply(mat, 1, function(x){(x-min(x))/(max(x)-min(x))}))
+mat <- mat[levels(seu$group)[1:5],]
+mat <- as_tibble(mat, rownames = "group")
+
+plist <- list()
+for (i in 1:5){
+  plist[[i]] <- 
+    ggradar(mat[i,], fill = T,
+        group.point.size = 2, group.line.width = 0.5,
+        plot.extent.x.sf = 1.5,
+        background.circle.colour = "white", 
+        group.colours = "red")
+}
+FigureS6_B_4 <- plot_grid(plotlist=plist, nrow=1)
+FigureS6_B_4
+```
+
+
+```{r}
+#| eval: false
+
+ggsave("../pdf/FigureS6/FigureS6_B_4.pdf", plot = FigureS6_B_4,
+       height = 3, width = 16, units = "in")
+```
+
 
 
 ## FigureS6_C

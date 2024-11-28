@@ -779,5 +779,87 @@ ggsave("../pdf/FigureS5/FigureS5_M_2.pdf", plot = FigureS5_M_2,
 
 
 
+## 3D new
+
+```{r}
+bg3d(color = "white")
+#bg3d(color = "black")
+
+par3d(userMatrix = rotationMatrix(-pi/6, -1, 1, 0), zoom = 0.6)
+acr.list <- c("MOs","PL","ORBm","ACAd","ILA","DP","ACAv")
+
+for(acr in acr.list){
+  mesh <- mesh3d.allen.annot.from.id(id.from.acronym(acr))
+  to.del <- which(mesh$vb[1,] < 0)
+  #to.del <- NA
+  mesh$it <- mesh$it[,!is.element(mesh$it[1,], to.del) & !is.element(mesh$it[2,], to.del) & !is.element(mesh$it[3,], to.del)]
+  #col <- color.from.acronym(acr)
+  col <- "lightgray"
+  #col <- col_Region[acr]
+  wire3d(mesh, col = col, material = list(lit=FALSE), alpha = 0.2)
+}
+
+df_plot <- sp.PFC@meta.data
+df_plot$AP_new <- df_plot$AP_new + runif(n= length(df_plot$AP_new), min= -1 , max= 1)*0.055555
+df_plot <- df_plot[which(df_plot$`CP-I`>0 & df_plot$ABA_hemisphere=="Left"),]
+for (i in c(1:13)){
+  idx_cluster = rownames(df_plot)[which(
+    df_plot$SubType==names(col_SubType)[i]
+    )]
+  spheres3d(x = df_plot[idx_cluster,]$ML_new, 
+            y = df_plot[idx_cluster,]$DV_new,
+            z = df_plot[idx_cluster,]$AP_new,
+            col = col_SubType[i], radius=0.01, alpha=1)
+  spheres3d(x = df_plot[idx_cluster,]$ML_new, 
+            y = df_plot[idx_cluster,]$DV_new,
+            z = -1.5,
+            col = col_SubType[i], radius=0.01, alpha=1)
+}
+
+hdr <- ggdensity::get_hdr(
+  data.frame(x=df_plot$ML_new, y=df_plot$AP_new),
+  rangex = c(0,3),
+  rangey = c(-1.5,3)
+)
+hdr_data <- tidyr::spread(hdr$df_est[,c("x","y","fhat")], y, fhat, fill = 0)
+rownames(hdr_data) <- hdr_data$x
+hdr_data <- hdr_data[,-1]
+
+z <- as.matrix(hdr_data)
+z <- z - quantile(z[z>0], probs=0.90)
+z[z<0] <- 0
+z <- round(z*100)
+x <- as.numeric(rownames(hdr_data))
+y <- as.numeric(colnames(hdr_data))
+
+zlim <- range(z)
+zlen <- zlim[2] - zlim[1] + 1
+colorlut <- colorRampPalette(
+  c(rep("black",1),"#5E4FA2","#3288BD","#66C2A5","#ABDDA4","#E6F598","#FFFFBF","#FEE08B",
+    "#FDAE61","#F46D43","#D53E4F","#9E0142"))(zlen)
+colorlut <- colorRampPalette(
+  c(rep("black",1), sciRcolor::pal_scircolor(100)))(zlen)
+
+col <- colorlut[z - zlim[1] + 1]
+z_bottom <- matrix(-5, nrow=length(x), ncol=length(y))
+surface3d(x, z_bottom, y, color = col)
+light3d(theta=0, phi=90)
+
+axes3d(labels = FALSE, tick=FALSE, nticks = 0, lwd=3)
+grid3d(c("x","y","z"), lwd=2)
+
+par3d(userMatrix = rotationMatrix(-pi/4, -1/10, 1, 0), zoom = 0.65, lwd = 2)
+par3d(userMatrix = rotationMatrix(-pi/6, -1, 1, 0), zoom = 0.7)
+rgl.snapshot('../pdf/Figure2/Figure2_C/SSp-I-3d-2d.png', top = TRUE)
+rgl.postscript('../pdf/Figure2/Figure2_C/SSp-I-3d-2d.j', fmt = 'jpg')
+```
+
+
+
+
+
+
+
+
 
 
